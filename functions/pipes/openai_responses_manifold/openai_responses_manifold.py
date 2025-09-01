@@ -6,7 +6,7 @@ author_url: https://github.com/jrkropp
 git_url: https://github.com/jrkropp/open-webui-developer-toolkit/blob/main/functions/pipes/openai_responses_manifold/openai_responses_manifold.py
 description: Brings OpenAI Response API support to Open WebUI, enabling features not possible via Completions API.
 required_open_webui_version: 0.6.3
-version: 0.9.2
+version: 0.9.3
 license: MIT
 """
 
@@ -42,27 +42,93 @@ from pydantic import BaseModel, Field, model_validator
 # Open WebUI internals
 from open_webui.models.chats import Chats
 from open_webui.models.models import ModelForm, Models
+from open_webui.utils.misc import get_last_user_message
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Constants & Global Configuration
 # ─────────────────────────────────────────────────────────────────────────────
-# Feature flags and other module level constants
-FEATURE_SUPPORT = {
-    "web_search_tool": {"gpt-5", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o3", "o3-pro", "o4-mini", "o3-deep-research", "o4-mini-deep-research"}, # OpenAI's built-in web search tool.
-    "image_gen_tool": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1-nano", "o3"}, # OpenAI's built-in image generation tool.
-    "function_calling": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1-nano", "o3", "o4-mini", "o3-mini", "o3-pro", "o3-deep-research", "o4-mini-deep-research"}, # OpenAI's native function calling support.
-    "reasoning": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "o3", "o4-mini", "o3-mini","o3-pro", "o3-deep-research", "o4-mini-deep-research"}, # OpenAI's reasoning models.
-    "reasoning_summary": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "o3", "o4-mini", "o4-mini-high", "o3-mini", "o3-mini-high", "o3-pro", "o3-deep-research", "o4-mini-deep-research"}, # OpenAI's reasoning summary feature.  May require OpenAI org verification before use.
-    "verbosity": {"gpt-5", "gpt-5-mini", "gpt-5-nano"}, # Supports OpenAI's verbosity parameter.
+class ModelFamily:
+    """One place for base capabilities + alias mapping (with effort defaults)."""
 
-    # NOTE: Deep Research models are not yet supported in pipe.  Work in-progress.
-    "deep_research": {"o3-deep-research", "o4-mini-deep-research"}, # OpenAI's deep research models.
-}
+    _DATE_RE = re.compile(r"-\d{4}-\d{2}-\d{2}$")
+    _PREFIX  = "openai_responses."
 
-DETAILS_RE = re.compile(
-    r"<details\b[^>]*>.*?</details>|!\[.*?]\(.*?\)",
-    re.S | re.I,
-)
+    # Base models → capabilities.
+    _SPECS: Dict[str, Dict[str, Any]] = {
+        "gpt-5-auto":           {"features": {"function_calling","reasoning","reasoning_summary","web_search_tool","image_gen_tool","verbosity"}},
+
+        "gpt-5":                {"features": {"function_calling","reasoning","reasoning_summary","web_search_tool","image_gen_tool","verbosity"}},
+        "gpt-5-mini":           {"features": {"function_calling","reasoning","reasoning_summary","image_gen_tool","verbosity"}},
+        "gpt-5-nano":           {"features": {"function_calling","reasoning","reasoning_summary","image_gen_tool","verbosity"}},
+
+        "gpt-4.1":              {"features": {"function_calling","web_search_tool","image_gen_tool"}},
+        "gpt-4.1-mini":         {"features": {"function_calling","web_search_tool","image_gen_tool"}},
+        "gpt-4.1-nano":         {"features": {"function_calling","image_gen_tool"}},
+
+        "gpt-4o":               {"features": {"function_calling","web_search_tool","image_gen_tool"}},
+        "gpt-4o-mini":          {"features": {"function_calling","web_search_tool","image_gen_tool"}},
+
+        "o3":                   {"features": {"function_calling","reasoning","reasoning_summary"}},
+        "o3-mini":              {"features": {"function_calling","reasoning","reasoning_summary"}},
+        "o3-pro":               {"features": {"function_calling","reasoning"}},
+
+        "o4-mini":              {"features": {"function_calling","reasoning","reasoning_summary","web_search_tool"}},
+        "o3-deep-research":     {"features": {"function_calling","reasoning","reasoning_summary","deep_research"}},
+        "o4-mini-deep-research":{"features": {"function_calling","reasoning","reasoning_summary","deep_research"}},
+
+        "gpt-5-chat-latest":    {"features": {}},
+        "chatgpt-4o-latest":    {"features": {}},
+    }
+
+    # Aliases/pseudos: keep base + implied params together.
+    # Note: params follow the CompletionsBody model and are later transformed to ResponsesBody format
+    _ALIASES: Dict[str, Dict[str, Any]] = {
+        "gpt-5-thinking":               {"base": "gpt-5"},
+        "gpt-5-thinking-minimal":       {"base": "gpt-5",       "params": {"reasoning": {"effort": "minimal"}}},
+        "gpt-5-thinking-high":          {"base": "gpt-5",       "params": {"reasoning": {"effort": "high"}}},
+
+        "gpt-5-thinking-mini":          {"base": "gpt-5-mini"},
+        "gpt-5-thinking-mini-minimal":  {"base": "gpt-5-mini",  "params": {"reasoning": {"effort": "minimal"}}},
+
+        "gpt-5-thinking-nano":          {"base": "gpt-5-nano"},
+        "gpt-5-thinking-nano-minimal":  {"base": "gpt-5-nano",  "params": {"reasoning": {"effort": "minimal"}}},
+
+        # Back-compat
+        "o3-mini-high":                 {"base": "o3-mini",     "params": {"reasoning": {"effort": "high"}}},
+        "o4-mini-high":                 {"base": "o4-mini",     "params": {"reasoning": {"effort": "high"}}},
+        "gpt-5-main":                   {"base": "gpt-5"},
+        "gpt-5-main-mini":              {"base": "gpt-5-mini"},
+        "gpt-5-thinking-pro":           {"base": "gpt-5",       "params": {"reasoning": {"effort": "high"}}},
+    }
+
+    # ── tiny, intuitive helpers ──────────────────────────────────────────────
+    @classmethod
+    def _norm(cls, model_id: str) -> str:
+        m = (model_id or "").strip()
+        if m.startswith(cls._PREFIX): m = m[len(cls._PREFIX):]
+        return cls._DATE_RE.sub("", m.lower())
+
+    @classmethod
+    def base(cls, model_id: str) -> str:
+        """Canonical base id (aliases resolved; prefix/date stripped)."""
+        key = cls._norm(model_id)
+        base = cls._ALIASES.get(key, {}).get("base")
+        return cls._norm(base or key)
+
+    @classmethod
+    def params(cls, model_id: str) -> Dict[str, Any]:
+        """Alias-implied defaults (e.g., {'reasoning_effort':'high'}). Empty for base ids."""
+        key = cls._norm(model_id)
+        return dict(cls._ALIASES.get(key, {}).get("params", {}))
+
+    @classmethod
+    def features(cls, model_id: str) -> frozenset[str]:
+        """Capabilities for the base model behind this id/alias."""
+        return frozenset(cls._SPECS.get(cls.base(model_id), {}).get("features", set()))
+
+    @classmethod
+    def supports(cls, feature: str, model_id: str) -> bool:
+        return feature in cls.features(model_id)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. Data Models
@@ -79,51 +145,11 @@ class CompletionsBody(BaseModel):
     class Config:
         extra = "allow" # Pass through additional OpenAI parameters automatically
 
-    # Sanitize the ``model`` field after validation.
-    @model_validator(mode='after')
-    def normalize_model(self) -> "CompletionsBody":
-        """Normalize model: strip 'openai_responses.' prefix and map '-high' pseudo-models."""
-        
-        # Remove prefix if present
-        m = (self.model or "").strip()
-        if m.startswith("openai_responses."):
-            m = m[len("openai_responses."):]
-
-        key = m.lower()
-
-        # Alias mapping: pseudo ID -> (real model, reasoning effort)
-        aliases = {
-            # GPT-5 Thinking family
-            "gpt-5-thinking": ("gpt-5", None),
-            "gpt-5-thinking-minimal": ("gpt-5", "minimal"),
-            "gpt-5-thinking-high": ("gpt-5", "high"),
-            "gpt-5-thinking-mini": ("gpt-5-mini", None),
-            "gpt-5-thinking-mini-minimal": ("gpt-5-mini", "minimal"),
-            "gpt-5-thinking-nano": ("gpt-5-nano", None),
-            "gpt-5-thinking-nano-minimal": ("gpt-5-nano", "minimal"),
-
-            # Placeholder router
-            "gpt-5-auto": ("gpt-5-chat-latest", None),
-
-            # Backwards compatibility
-            "o3-mini-high": ("o3-mini", "high"),
-            "o4-mini-high": ("o4-mini", "high"),
-        }
-
-        if key in aliases:
-            real, effort = aliases[key]
-            self.model = real
-            if effort:
-                self.reasoning_effort = effort  # type: ignore[assignment]
-        else:
-            self.model = key  # pass through official IDs as lowercase
-
-        return self
-
 class ResponsesBody(BaseModel):
     """
     Represents the body of a responses request to OpenAI Responses API.
     """
+    
     # Required parameters
     model: str
     input: Union[str, List[Dict[str, Any]]] # plain text, or rich array
@@ -146,18 +172,72 @@ class ResponsesBody(BaseModel):
     class Config:
         extra = "allow" # Allow additional OpenAI parameters automatically (future-proofing)
 
+    @model_validator(mode='after')
+    def _apply_alias_defaults(self) -> "ResponsesBody":
+        """
+        Normalize the model ID to its base and apply alias defaults from ModelFamily.
+
+        Example:
+            model="gpt-5-thinking-high" → model="gpt-5", reasoning={"effort": "high"}
+        """
+        orig_model = self.model or ""
+        base_model = ModelFamily.base(orig_model)
+        alias_defaults = ModelFamily.params(orig_model) or {}
+
+        # No alias? keep as-is
+        if base_model == orig_model and not alias_defaults:
+            return self
+
+        # Work on a deep copy of current state
+        data = json.loads(self.model_dump_json(exclude_none=False))
+        data["model"] = base_model
+
+        def _deep_overlay(dst: dict, src: dict) -> dict:
+            for k, v in src.items():
+                if isinstance(v, dict):
+                    node = dst.get(k)
+                    if isinstance(node, dict):
+                        _deep_overlay(node, v)
+                    else:
+                        dst[k] = json.loads(json.dumps(v))  # deep copy
+                elif isinstance(v, list):
+                    cur = dst.get(k)
+                    if isinstance(cur, list):
+                        seen = set(); out = []
+                        def _key(x):
+                            try: return ("json", json.dumps(x, sort_keys=True))
+                            except Exception: return ("id", id(x))
+                        for item in cur + v:
+                            kk = _key(item)
+                            if kk not in seen:
+                                seen.add(kk); out.append(item)
+                        dst[k] = out
+                    else:
+                        dst[k] = list(v)
+                else:
+                    dst[k] = v
+            return dst
+
+        if alias_defaults:
+            _deep_overlay(data, alias_defaults)
+
+        # Write merged data back onto the model
+        for k, v in data.items():
+            setattr(self, k, v)
+        return self   
+
     @staticmethod
-    def transform_owui_tools(owui_tools: Dict[str, dict] | None, *, strict: bool = False) -> List[dict]:
+    def transform_owui_tools(__tools__: Dict[str, dict] | None, *, strict: bool = False) -> List[dict]:
         """
         Convert Open WebUI __tools__ registry (dict of entries with {"spec": {...}}) into
         OpenAI Responses-API tool specs: {"type": "function", "name", ...}.
 
         """
-        if not owui_tools:
+        if not __tools__:
             return []
 
         tools: List[dict] = []
-        for item in owui_tools.values():
+        for item in __tools__.values():
             spec = item.get("spec") or {}
             name = spec.get("name")
             if not name:
@@ -253,6 +333,7 @@ class ResponsesBody(BaseModel):
         -------
         List[dict] : The fully-formed `input` list for the OpenAI Responses API.
         """
+        DETAILS_RE = re.compile(r"<details\b[^>]*>.*?</details>|!\[.*?]\(.*?\)", re.S | re.I)
 
         required_item_ids: set[str] = set()
 
@@ -443,17 +524,8 @@ class Pipe:
         MODEL_ID: str = Field(
             default="gpt-5-auto, gpt-5-chat-latest, gpt-5-thinking, gpt-5-thinking-high, gpt-5-thinking-minimal, gpt-4.1-nano, chatgpt-4o-latest, o3, gpt-4o",
             description=(
-            "Comma separated OpenAI model IDs. Each ID becomes a model entry in WebUI. "
-            "Supports all official OpenAI model IDs and pseudo IDs: "
-            "gpt-5-auto, "
-            "gpt-5-thinking, "
-            "gpt-5-thinking-minimal, "
-            "gpt-5-thinking-high, "
-            "gpt-5-thinking-mini, "
-            "gpt-5-thinking-mini-minimal, "
-            "gpt-5-thinking-nano, "
-            "gpt-5-thinking-nano-minimal, "
-            "o3-mini-high, o4-mini-high."
+                "Comma separated OpenAI model IDs. Each ID becomes a model entry in WebUI. "
+                "Supports all official OpenAI model IDs and pseudo IDs (see README.md for full list)."
             ),
         )
 
@@ -597,11 +669,11 @@ class Pipe:
         user_identifier = __user__[valves.PROMPT_CACHE_KEY]  # Use 'id' or 'email' as configured
         features = __metadata__.get("features", {}).get("openai_responses", {}) # Custom location that this manifold uses to store feature flags
 
-        # Set up session logger with session_id and log level
+        # STEP 0: Set up session logger with session_id and log level
         SessionLogger.session_id.set(__metadata__.get("session_id", None))
         SessionLogger.log_level.set(getattr(logging, valves.LOG_LEVEL.upper(), logging.INFO))
 
-        # Transform request body (Completions API -> Responses API).
+        # STEP 1: Transform request body (Completions API -> Responses API).
         completions_body = CompletionsBody.model_validate(body)
         responses_body = ResponsesBody.from_completions(
             completions_body=completions_body,
@@ -616,111 +688,67 @@ class Pipe:
             **({"max_tool_calls": valves.MAX_TOOL_CALLS} if valves.MAX_TOOL_CALLS is not None else {}),
         )
 
-        # Detect if task model (generate title, generate tags, etc.), handle it separately
+        # STEP 2: Detect if task model (generate title, generate tags, etc.), handle it separately
         if __task__:
             self.logger.info("Detected task model: %s", __task__)
             return await self._run_task_model_request(responses_body.model_dump(), valves) # Placeholder for task handling logic
 
-        # If GPT-5-Auto, run through model router and update body.
-        if openwebui_model_id.endswith(".gpt-5-auto"):
-            await self._emit_notification(
-                __event_emitter__,
-                content="Routing request to the best GPT-5 model…",
-                level="info",
-            )
+        # STEP 3: Build OpenAI Tools JSON (from __tools__, valves, and completions_body.extra_tools)
+        __tools__ = await __tools__ if inspect.isawaitable(__tools__) else __tools__  # Await coroutine if needed (required for newer versions of Open WebUI)
+        tools = build_tools(
+            responses_body,
+            valves,
+            __tools__=__tools__,
+            features=features,
+            extra_tools=getattr(completions_body, "extra_tools", None),
+        )
 
-            responses_body = await self._route_gpt5_auto(
-                responses_body,
-                valves,
-            )
-
-        # Normalize to family-level model name (e.g., 'o3' from 'o3-2025-04-16') to be used for feature detection.
-        model_family = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", responses_body.model)
-
-        # Resolve __tools__ coroutine returned by newer Open WebUI versions.
-        if inspect.isawaitable(__tools__):
-            __tools__ = await __tools__
-
-        # ---------- TOOL ASSEMBLY (single merge point) ----------
-        if model_family in FEATURE_SUPPORT["function_calling"]:
-            tools: List[Dict[str, Any]] = []
-
-            # 1) Baseline: normalize Open WebUI registry tools (__tools__)
-            if __tools__:
-                tools.extend(
-                    ResponsesBody.transform_owui_tools(
-                        __tools__, strict=valves.ENABLE_STRICT_TOOL_CALLING
-                    )
-                )
-
-            # 2) Valves: built-in auto tools (web_search_preview, MCP)
-            if (
-                model_family in FEATURE_SUPPORT["web_search_tool"]
-                and (
-                    valves.ENABLE_WEB_SEARCH_TOOL
-                    or features.get("web_search_preview", False) # For backwards compatibility with old web_search_toggle_filter.py which enabled web search via __metadata__
-                )
-                and ((responses_body.reasoning or {}).get("effort", "").lower() != "minimal")
-            ):
-                web_search_tool = {
-                    "type": "web_search_preview",
-                    "search_context_size": valves.WEB_SEARCH_CONTEXT_SIZE,
-                }
-                if valves.WEB_SEARCH_USER_LOCATION:
-                    web_search_tool["user_location"] = json.loads(valves.WEB_SEARCH_USER_LOCATION)
-                tools.append(web_search_tool)
-
-            if valves.REMOTE_MCP_SERVERS_JSON:
-                tools.extend(ResponsesBody._build_mcp_tools(valves.REMOTE_MCP_SERVERS_JSON))
-
-            # 3) Filters: extra_tools (already OpenAI schema) – append as-is if present
-            extra_tools = getattr(completions_body, "extra_tools", None)
-            if isinstance(extra_tools, list) and extra_tools:
-                tools.extend(extra_tools)
-
-            # 4) Deduplicate (later wins) and assign
-            responses_body.tools = _dedupe_tools(tools) or None
-        # --------------------------------------------------------
-
-        # Check if tools are enabled but native function calling is disabled
-        # If so, update the OpenWebUI model parameter to enable native function calling for future requests.
-        if responses_body.tools:
+        # STEP 4: Auto-enable native function calling if tools are used but `native` function calling is not enabled in Open WebUI model settings.
+        if tools and ModelFamily.supports("function_calling", openwebui_model_id):
             model = Models.get_model_by_id(openwebui_model_id)
             if model:
                 params = dict(model.params or {})
                 if params.get("function_calling") != "native":
-                    supports_function_calling = model_family in FEATURE_SUPPORT["function_calling"]
+                    await self._emit_notification(
+                        __event_emitter__,
+                        content=f"Enabling native function calling for model: {openwebui_model_id}. Please re-run your query.",
+                        level="info"
+                    )
+                    params["function_calling"] = "native"
+                    form_data = model.model_dump()
+                    form_data["params"] = params
+                    Models.update_model_by_id(openwebui_model_id, ModelForm(**form_data))
 
-                    if supports_function_calling:
-                        await self._emit_notification(
-                            __event_emitter__,
-                            content=f"Enabling native function calling for model: {openwebui_model_id}. Please re-run your query.",
-                            level="info"
-                        )
+        # STEP 5: Handle GPT-5-Auto routing
+        if openwebui_model_id.endswith(".gpt-5-auto"):
+            responses_body = await self._route_gpt5_auto(
+                router_model="gpt-4.1-mini",
+                responses_body=responses_body,
+                tools=tools,
+                valves=valves,
+                event_emitter=__event_emitter__
+            )
 
-                        form_data = model.model_dump()
-                        form_data["params"] = params
-                        form_data["params"]["function_calling"] = "native"
-                        form = ModelForm(**form_data)
-                        Models.update_model_by_id(openwebui_model_id, form)
+        # STEP 6: Add tools to responses body, if supported
+        if ModelFamily.supports("function_calling", responses_body.model):
+            responses_body.tools = tools
 
-            
-        # Enable reasoning summary if enabled and supported
-        if model_family in FEATURE_SUPPORT["reasoning_summary"] and valves.REASONING_SUMMARY != "disabled":
+        # STEP 7: Enable reasoning summary if enabled and supported
+        if ModelFamily.supports("reasoning_summary", responses_body.model) and valves.REASONING_SUMMARY != "disabled":
             # Ensure reasoning param is a mutable dict so we can safely assign to it
             reasoning_params = dict(responses_body.reasoning or {})
             reasoning_params["summary"] = valves.REASONING_SUMMARY
             responses_body.reasoning = reasoning_params
 
-        # Always request encrypted reasoning for in-turn carry (multi-tool) unless disabled
-        if (model_family in FEATURE_SUPPORT["reasoning"]
+        # STEP 8: Always request encrypted reasoning for in-turn carry (multi-tool) unless disabled
+        if (ModelFamily.supports("reasoning", responses_body.model)
             and valves.PERSIST_REASONING_TOKENS != "disabled"
             and responses_body.store is False):
              responses_body.include = responses_body.include or []
              if "reasoning.encrypted_content" not in responses_body.include:
                  responses_body.include.append("reasoning.encrypted_content")
 
-        # Map WebUI "Add Details" / "More Concise" → text.verbosity (if supported by model), then strip the stub
+        # STEP 9: Map WebUI "Add Details" / "More Concise" → text.verbosity (if supported by model), then strip the stub
         input_items = responses_body.input if isinstance(responses_body.input, list) else None
         if input_items:
             last_item = input_items[-1]
@@ -733,8 +761,7 @@ class Pipe:
 
             if verbosity_value:
                 # Check model support
-                model_family = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", responses_body.model)
-                if model_family in FEATURE_SUPPORT["verbosity"]:
+                if ModelFamily.supports("verbosity", responses_body.model):
                     # Set/overwrite verbosity (do NOT remove the stub message)
                     current_text_params = dict(getattr(responses_body, "text", {}) or {})
                     current_text_params["verbosity"] = verbosity_value
@@ -748,16 +775,13 @@ class Pipe:
 
                     self.logger.debug("Set text.verbosity=%s based on regenerate directive '%s'",verbosity_value, last_user_text)
 
-        # Log final tool set
-        self.logger.debug("Final tools: %s", json.dumps(responses_body.tools or [], ensure_ascii=False))
-
-        # Log the transformed request body
+        # STEP 10: Log the transformed request body
         self.logger.debug(
             "Transformed ResponsesBody: %s",
             json.dumps(responses_body.model_dump(exclude_none=True), indent=2, ensure_ascii=False),
         )
-            
-        # Send to OpenAI Responses API
+
+        # STEP 11: Send to OpenAI Responses API
         if responses_body.stream:
             # Return async generator for partial text
             return await self._run_streaming_loop(responses_body, valves, __event_emitter__, __metadata__, __tools__)
@@ -789,13 +813,25 @@ class Pipe:
 
         # Emit initial "thinking" block:
         # If reasoning model, write "Thinking…" to the expandable status emitter.
-        model_family = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", body.model)
-        if model_family in FEATURE_SUPPORT["reasoning"]:
+        if ModelFamily.supports("reasoning", body.model):
             assistant_message = await status_indicator.add(
                 assistant_message,
                 status_title="Thinking…",
                 status_content="Reading the question and building a plan to answer it. This may take a moment.",
             )
+
+        model_router_result = getattr(body, "model_router_result", None)
+        if model_router_result:
+            delattr(body, "model_router_result")
+            model = model_router_result.get("model", "")
+            reasoning_effort = model_router_result.get("reasoning_effort", "")
+
+            assistant_message = await status_indicator.add(
+            assistant_message,
+            status_title=f"Routing to {model} (effort: {reasoning_effort})",
+            status_content=f"Explanation: {model_router_result.get('explanation', '')}"
+            )
+
 
         # Send OpenAI Responses API request, parse and emit response
         try:
@@ -1094,8 +1130,7 @@ class Pipe:
         status_indicator = ExpandableStatusIndicator(event_emitter)
         status_indicator._done = False
 
-        model_family = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", body.model)
-        if model_family in FEATURE_SUPPORT["reasoning"]:
+        if ModelFamily.supports("reasoning", body.model):
             assistant_message = await status_indicator.add(
                 assistant_message,
                 status_title="Thinking…",
@@ -1599,65 +1634,63 @@ class Pipe:
 
     async def _route_gpt5_auto(
         self,
+        router_model: str,
         responses_body: ResponsesBody,
+        tools: list[dict[str, Any]],
         valves: "Pipe.Valves",
+        event_emitter: Callable[[Dict[str, Any]], Awaitable[None]] | None = None,
     ) -> ResponsesBody:
-        """Select the best GPT‑5 model using a fast routing model.
+        """Route using first output message only (assumes no tool events)."""
 
-        A lightweight model (``gpt-4.1-nano``) analyses the most recent user
-        message and returns structured JSON with routing hints.  The router can
-        update the target ``model`` as well as optional fields such as
-        ``reasoning`` or ``tools``.  If the router request fails, the original
-        ``responses_body`` is returned unchanged.
-        """
-
-        # Extract last user message text for routing context
-        last_message = ""
-        if isinstance(responses_body.input, str):
-            last_message = responses_body.input
-        elif isinstance(responses_body.input, list) and responses_body.input:
-            last_item = responses_body.input[-1]
-            content = last_item.get("content", "")
-            if isinstance(content, list):
-                parts: List[str] = []
-                for block in content:
-                    if isinstance(block, dict):
-                        parts.append(block.get("text", ""))
-                    elif isinstance(block, str):
-                        parts.append(block)
-                last_message = " ".join(parts)
-            else:
-                last_message = str(content)
-
-        schema = {
-            "type": "object",
-            "properties": {
-                "model": {
-                    "type": "string",
-                    "enum": [
-                        "gpt-5-chat-latest",
-                        "gpt-5",
-                        "gpt-5-mini",
-                        "gpt-5-nano",
-                    ],
-                }
-            },
-            "required": ["model"],
-        }
-
+        # --- keep your existing router_body UNCHANGED ---
         router_body = {
-            "model": "gpt-4.1-nano",
-            "instructions": (
-                "You are a routing helper. Choose the best GPT-5 model from the list "
-                "based on the user's last message. Respond with JSON containing only "
-                "the 'model' field."
-            ),
-            "input": last_message,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {"name": "gpt5_router", "schema": schema},
-            },
+            "model": "gpt-5-mini",
+            "reasoning": {"effort": "minimal"},
+            "instructions": "# Role and Objective\nServe as a **routing helper** for selecting the most appropriate GPT-5 model for user messages, evaluating tool necessity and task complexity.\n\n---\n\n# Instructions\n- If a message may require the use of **any available tool**, select a model with **function calling** capabilities.\n- When tools are not necessary, favor the **fastest** or **most capable** model according to the complexity of the request.\n\n---\n\n# Available Models and Capabilities\n## Models\n\n- **gpt-5-chat-latest**\n  - Fast, general-purpose, and creative.\n  - Best for writing, drafting, and chat-based interactions.\n  - ⚠️ Does **not** support tool calling—select only when tools are not required.\n\n- **gpt-5-mini**\n  - Lightweight, supports tool usage, and is rapidly responsive.\n  - Suited for **simple tasks that may use tools** but don’t demand extensive reasoning.\n  - ✅ Function calling supported—offers a strong balance between speed and utility.\n\n- **gpt-5**\n  - Strong at reasoning and complex, multi-step analysis.\n  - Designed for **complex or deeply analytical tasks**.\n  - ✅ Supports function calling and advanced operations—choose for tool-reliant or high-complexity reasoning needs.\n\n---\n\n# Routing Checklist\n- Assess whether tool integration could improve the response.\n- Evaluate how much reasoning or problem-solving is required.\n- Match model to requirements:\n  - No tool usage required → use `gpt-5-chat-latest`\n  - Tools required, simple task → use `gpt-5-mini`\n  - Tools required, complex task → use `gpt-5`\n- When in doubt, prioritize a tool-capable model (prefer `gpt-5`).\n- Ask for more information if requirements are ambiguous.\n\n---\n\n# Output Format\nRespond only with a JSON object containing your model selection and a concise explanation. If the requirements are unclear, include an appropriate error message in the JSON response.\n\n---\n\n# Examples\n- **What’s the weather in Vancouver right now?**\n  ```json\n  {\n    \"model\": \"gpt-5-mini\",\n    \"explanation\": \"Quick tool lookup; simple enough for a fast model.\"\n  }\n  ```\n\n- **Compare the newest M3 laptops and cite sources.**\n  ```json\n  {\n    \"model\": \"gpt-5\",\n    \"explanation\": \"Research and synthesis with tools requires reasoning depth.\"\n  }\n  ```\n\n- **Summarize this email draft and make it more formal.**\n  ```json\n  {\n    \"model\": \"gpt-5-chat-latest\",\n    \"explanation\": \"Polishing text only; no tools needed.\"\n  }\n  ```\n\n- **Summarize this uploaded PDF into bullet points.**\n  ```json\n  {\n    \"model\": \"gpt-5\",\n    \"explanation\": \"Document parsing may require tools; complex enough for gpt-5.\"\n  }\n  ```\n\n- **Translate this paragraph into Spanish.**\n  ```json\n  {\n    \"model\": \"gpt-5-chat-latest\",\n    \"explanation\": \"Simple translation; tools not required.\"\n  }\n  ```\n\n- **List my upcoming meetings tomorrow.**\n  ```json\n  {\n    \"model\": \"gpt-5-mini\",\n    \"explanation\": \"Calendar tool lookup is simple; mini is efficient.\"\n  }\n  ```",
+            "input": responses_body.input,
+            "prompt_cache_key": "openai_responses_gpt5-router",
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "gpt5_router",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "model": {
+                                "type": "string",
+                                "enum": ["gpt-5-chat-latest", "gpt-5", "gpt-5-mini"],
+                                "description": "The selected GPT-5 model from the available options."
+                            },
+                            "reasoning_effort": {
+                                "type": "string",
+                                "enum": [
+                                    "minimal",
+                                    "low",
+                                    "medium",
+                                    "high"
+                                ],
+                                "description": "The estimated amount of reasoning effort required for the request."
+                            },
+                            "explanation": {
+                                "type": "string",
+                                "description": "Short 3-5 word rationale for why this model was selected.",
+                                "minLength": 3,
+                                "maxLength": 500
+                            },
+                        },
+                        "required": [
+                        "model",
+                        "explanation",
+                        "reasoning_effort"
+                        ],
+                        "additionalProperties": False
+                    },
+                    "verbosity": "medium",
+                },
+            }
         }
+        # -------------------------------------------------
 
         try:
             response = await self.send_openai_responses_nonstreaming_request(
@@ -1665,28 +1698,33 @@ class Pipe:
                 api_key=valves.API_KEY,
                 base_url=valves.BASE_URL,
             )
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning("GPT-5 router request failed: %s", exc)
+            return responses_body
 
-            router_json: Dict[str, Any] = {}
-            for item in response.get("output", []):
-                if item.get("type") != "message":
-                    continue
-                for content in item.get("content", []):
-                    if content.get("type") == "output_text":
-                        text = content.get("text", "")
-                        try:
-                            router_json = json.loads(text)
-                        except Exception:  # pragma: no cover - defensive
-                            router_json = {}
-                        break
+        # Simple shape: output[0].content[0].text
+        try:
+            text = next((b["text"] for o in reversed(response["output"]) if o["type"]=="message" for b in o["content"] if b["type"]=="output_text"), "")
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning("Router response missing expected fields: %s; payload keys=%s",
+                                exc, list(response.keys()))
+            return responses_body
 
-            if router_json:
-                model = router_json.get("model")
-                if model:
-                    responses_body.model = model
+        # Parse JSON (with a tiny fallback to the first {...} block)
+        try:
+            router_json: Dict[str, Any] = json.loads(text)
+        except Exception:
+            start, end = text.find("{"), text.rfind("}")
+            router_json = json.loads(text[start:end+1]) if start != -1 and end != -1 and end > start else {}
 
-        except Exception as exc:  # pragma: no cover - network issues etc.
-            self.logger.warning("GPT‑5 router failed: %s", exc)
+        if router_json:
+            responses_body.model = router_json.get("model")
+            if ModelFamily.supports("reasoning", responses_body.model):
+                reasoning = dict(responses_body.reasoning or {})
+                reasoning["effort"] = router_json.get("reasoning_effort")
+                responses_body.reasoning = reasoning
 
+            responses_body.model_router_result = router_json
         return responses_body
 
     # 4.8 Internal Static Helpers
@@ -2309,6 +2347,74 @@ def fetch_openai_response_items(
 # ─────────────────────────────────────────────────────────────────────────────
 # 9. Tool & Schema Utilities (internal)
 # ─────────────────────────────────────────────────────────────────────────────
+def build_tools(
+    responses_body: "ResponsesBody",
+    valves: "Pipe.Valves",
+    __tools__: Optional[Dict[str, Any]] = None,
+    *,
+    features: Optional[Dict[str, Any]] = None,
+    extra_tools: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Build the OpenAI Responses-API tool spec list for this request.
+
+    - Returns [] if the target model doesn't support function calling.
+    - Includes Open WebUI registry tools (strictified if enabled).
+    - Adds OpenAI web_search_preview (if allowed + supported + not minimal effort).
+    - Adds MCP tools from REMOTE_MCP_SERVERS_JSON.
+    - Appends any caller-provided extra_tools (already-valid OpenAI tool specs).
+    - Deduplicates by (type,name) identity; last one wins.
+
+    NOTE: This builds the *schema* to send to OpenAI. For executing function
+    calls at runtime, you can keep passing the raw `__tools__` registry into
+    your streaming/non-streaming loops; those functions expect name→callable.
+    """
+    logger = logging.getLogger(__name__)
+    features = features or {}
+
+    # 1) If model can't do function calling, no tools
+    if not ModelFamily.supports("function_calling", responses_body.model):
+        return []
+
+    tools: List[Dict[str, Any]] = []
+
+    # 2) Baseline: Open WebUI registry tools → OpenAI tool specs
+    if isinstance(__tools__, dict) and __tools__:
+        tools.extend(
+            ResponsesBody.transform_owui_tools(
+                __tools__,
+                strict=valves.ENABLE_STRICT_TOOL_CALLING,
+            )
+        )
+
+    # 3) Optional OpenAI web search tool (guarded + not for minimal effort)
+    allow_web = (
+        ModelFamily.supports("web_search_tool", responses_body.model)
+        and (valves.ENABLE_WEB_SEARCH_TOOL or features.get("web_search_preview", False))
+        and ((responses_body.reasoning or {}).get("effort", "").lower() != "minimal")
+    )
+    if allow_web:
+        web_search_tool: Dict[str, Any] = {
+            "type": "web_search_preview",
+            "search_context_size": valves.WEB_SEARCH_CONTEXT_SIZE,
+        }
+        if valves.WEB_SEARCH_USER_LOCATION:
+            try:
+                web_search_tool["user_location"] = json.loads(valves.WEB_SEARCH_USER_LOCATION)
+            except Exception as exc:  # don't fail the request if user_location is malformed
+                logger.warning("WEB_SEARCH_USER_LOCATION is not valid JSON; ignoring: %s", exc)
+        tools.append(web_search_tool)
+
+    # 4) Optional MCP servers
+    if valves.REMOTE_MCP_SERVERS_JSON:
+        tools.extend(ResponsesBody._build_mcp_tools(valves.REMOTE_MCP_SERVERS_JSON))
+
+    # 5) Optional extra tools (already OpenAI-format)
+    if isinstance(extra_tools, list) and extra_tools:
+        tools.extend(extra_tools)
+
+    return _dedupe_tools(tools)
+
 
 def _strictify_schema(schema):
     """
