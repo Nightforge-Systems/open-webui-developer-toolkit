@@ -3,7 +3,11 @@ Enables advanced OpenAI features (function calling, web search, visible reasonin
 
 Now supports OpenAI’s GPT‑5 family in the API — [Learn more](#gpt5-model-support).
 
-This project started as an internal tool (200+ hours of optimization and testing) and is now open-sourced as a way to give back to the Open WebUI community.
+This project started as an internal project (200+ hours of optimization and testing) and is now open-sourced as a way to give back to the Open WebUI community.
+
+✨ Like the manifold?  
+Show your support by **sharing it with others** and providing feedback through [GitHub Discussions](https://github.com/jrkropp/open-webui-developer-toolkit/discussions).  
+**Pull Requests are welcome!**
 
 ## Contents
 
