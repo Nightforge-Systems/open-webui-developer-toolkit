@@ -133,7 +133,7 @@ body.setdefault("extra_tools", []).append({
 This makes features like **on-demand web search toggles** possible without breaking native function calling.
 
 ## Tested Models
-The manifold ahould work with any model that supports the **OpenAI Responses API**.  
+The manifold should work with any model that supports the **OpenAI Responses API**.  
 Below are the official model IDs that have been tested and confirmed.
 
 ### Official Model IDs
