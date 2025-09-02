@@ -5,6 +5,17 @@ All notable changes to the OpenAI Responses Manifold pipeline are documented in 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2025-08-28
+- Added `ENABLE_STRICT_TOOL_CALLING` valve (default: `True`). When enabled, the manifold converts Open WebUI registry tools to strict JSON Schemas and sets `strict: true` on function tools when passing to the OpenAI Responses API.
+
+## [0.9.2] - 2025-09-25
+- Introduced GPT-5 auto router: uses `gpt-4.1-nano` to analyze the prompt and update the request with the best GPT-5 variant.
+
+
+## [0.9.0] - 2025-08-28
+- Added `extra_tools` field for filter-injected tools with a single merge point and deduplication.
+- Rewrote logic for how tools are handled.  Simplified and added support for edge cases.
+
 ## [0.8.28] - 2025-08-21
 - Resolved compatibility with Open WebUI v0.6.23 by awaiting `__tools__` when
   it is provided as a coroutine.

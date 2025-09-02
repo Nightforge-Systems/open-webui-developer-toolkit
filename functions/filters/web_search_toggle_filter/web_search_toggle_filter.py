@@ -3,7 +3,7 @@ title: Web Search
 id: web_search_toggle_filter
 description: Instruct the model to search the web for the latest information.
 required_open_webui_version: 0.6.10
-version: 0.2.0
+version: 0.3.0
 
 Note: Designed to work with the OpenAI Responses manifold
       https://github.com/jrkropp/open-webui-developer-toolkit/tree/main/functions/pipes/openai_responses_manifold
@@ -65,29 +65,35 @@ class Filter:
         __metadata__: Optional[dict] = None,
     ) -> Dict[str, Any]:
         
+        # 0) Turn off WebUI’s own (legacy) search toggle; we’ll manage tools ourselves.
         if __metadata__:
-            # Explicitly disable WebUI’s native search
             __metadata__.setdefault("features", {}).update({"web_search": False})
 
-            # Activate the custom OpenAI Responses search feature
-            __metadata__["features"].setdefault("openai_responses", {})["web_search"] = True
-
-        # --- Tell the model to search (forced vs. gentle nudge)
-        if body.get("model") in SUPPORT_TOOL_CHOICE_PARAMETER:
-            body["tool_choice"] = {"type": "web_search_preview"}
-        else:
-            body.setdefault("messages", []).append(
-                {
-                    "role": "developer",
-                    "content": (
-                        "Web search is enabled. "
-                        "Use the `web_search` tool whenever you need fresh information."
-                    ),
-                }
-            )
-
-        # Switch to default search-compatible model if needed
+        # 1) Ensure we’re on a search-capable model
         if body.get("model") not in WEB_SEARCH_MODELS:
             body["model"] = self.valves.DEFAULT_SEARCH_MODEL
 
+        # 2) Add OpenAI’s web-search tool via extra_tools (as-is; manifold will append & strip)
+        #    You can later switch "web_search_preview" -> "web_search" when you migrate.
+        body.setdefault("extra_tools", []).append({
+            "type": "web_search_preview",
+            "search_context_size": self.valves.SEARCH_CONTEXT_SIZE
+            # Optionally include user_location when you have one:
+            # "user_location": {"type": "approximate", "country": "CA", "region": "BC", "city": "Langley"}
+        })
+
+        # 3) (Optional) Nudge/force usage:
+        #    If the model supports tool_choice for web_search, you can force it;
+        #    otherwise add a gentle developer reminder.
+        if body.get("model") in SUPPORT_TOOL_CHOICE_PARAMETER:
+            body["tool_choice"] = {"type": "web_search_preview"}  # keep if GA; otherwise leave unset
+        else:
+            body.setdefault("messages", []).append({
+                "role": "developer",
+                "content": (
+                    "Web search is enabled. Use the `web_search_preview` tool whenever you need fresh information."
+                )
+            })
+
         return body
+

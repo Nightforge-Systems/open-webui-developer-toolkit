@@ -13,13 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "ruff",
-  "pytest",
-  "pytest-asyncio",
-  "pytest-cov",
-  "nox",
-  "pre-commit",
-  "orjson"
+  "pytest"
 ]
 
 [build-system]
@@ -44,15 +38,25 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = [".tests"]
-pythonpath = [
-  "external/open-webui/backend"
+testpaths = ["functions"]            # let pytest recurse under functions/
+python_files = "test_*.py"           # default, but explicit is nice
+python_classes = ""                  # don’t require Test* classes
+python_functions = "test_*"
+norecursedirs = [
+  "external",
+  "open-webui",
+  "*.egg-info",
+  "dist",
+  "build"
 ]
 addopts = """
 -ra
 --import-mode=importlib
 --cov=functions
 --cov=tools
+--cov-branch
 --cov-report=term-missing
 --asyncio-mode=auto
+--color=yes
 """
+pythonpath = ["external/open-webui/backend"]
