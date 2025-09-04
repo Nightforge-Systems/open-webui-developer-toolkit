@@ -74,9 +74,9 @@ class Filter:
             body["model"] = self.valves.DEFAULT_SEARCH_MODEL
 
         # 2) Add OpenAI’s web-search tool via extra_tools (as-is; manifold will append & strip)
-        #    You can later switch "web_search_preview" -> "web_search" when you migrate.
+        #    You can later switch "web_search" -> "web_search" when you migrate.
         body.setdefault("extra_tools", []).append({
-            "type": "web_search_preview",
+            "type": "web_search",
             "search_context_size": self.valves.SEARCH_CONTEXT_SIZE
             # Optionally include user_location when you have one:
             # "user_location": {"type": "approximate", "country": "CA", "region": "BC", "city": "Langley"}
@@ -86,12 +86,12 @@ class Filter:
         #    If the model supports tool_choice for web_search, you can force it;
         #    otherwise add a gentle developer reminder.
         if body.get("model") in SUPPORT_TOOL_CHOICE_PARAMETER:
-            body["tool_choice"] = {"type": "web_search_preview"}  # keep if GA; otherwise leave unset
+            body["tool_choice"] = {"type": "web_search"}  # keep if GA; otherwise leave unset
         else:
             body.setdefault("messages", []).append({
                 "role": "developer",
                 "content": (
-                    "Web search is enabled. Use the `web_search_preview` tool whenever you need fresh information."
+                    "Web search is enabled. Use the `web_search` tool whenever you need fresh information."
                 )
             })
 
