@@ -578,7 +578,7 @@ class Pipe:
         # Web search
         ENABLE_WEB_SEARCH_TOOL: bool = Field(
             default=False,
-            description="Enable OpenAI's built-in 'web_search_preview' tool when supported (gpt-4.1, gpt-4.1-mini, gpt-4o, gpt-4o-mini, o3, o4-mini, o4-mini-high).  NOTE: This appears to disable parallel tool calling. Read more: https://platform.openai.com/docs/guides/tools-web-search?api-mode=responses",
+            description="Enable OpenAI's built-in 'web_search' tool when supported (gpt-4.1, gpt-4.1-mini, gpt-4o, gpt-4o-mini, o3, o4-mini, o4-mini-high).  NOTE: This appears to disable parallel tool calling. Read more: https://platform.openai.com/docs/guides/tools-web-search?api-mode=responses",
         )
         WEB_SEARCH_CONTEXT_SIZE: Literal["low", "medium", "high", None] = Field(
             default="medium",
@@ -2360,7 +2360,7 @@ def build_tools(
 
     - Returns [] if the target model doesn't support function calling.
     - Includes Open WebUI registry tools (strictified if enabled).
-    - Adds OpenAI web_search_preview (if allowed + supported + not minimal effort).
+    - Adds OpenAI web_search (if allowed + supported + not minimal effort).
     - Adds MCP tools from REMOTE_MCP_SERVERS_JSON.
     - Appends any caller-provided extra_tools (already-valid OpenAI tool specs).
     - Deduplicates by (type,name) identity; last one wins.
@@ -2390,12 +2390,12 @@ def build_tools(
     # 3) Optional OpenAI web search tool (guarded + not for minimal effort)
     allow_web = (
         ModelFamily.supports("web_search_tool", responses_body.model)
-        and (valves.ENABLE_WEB_SEARCH_TOOL or features.get("web_search_preview", False))
+        and (valves.ENABLE_WEB_SEARCH_TOOL or features.get("web_search", False))
         and ((responses_body.reasoning or {}).get("effort", "").lower() != "minimal")
     )
     if allow_web:
         web_search_tool: Dict[str, Any] = {
-            "type": "web_search_preview",
+            "type": "web_search",
             "search_context_size": valves.WEB_SEARCH_CONTEXT_SIZE,
         }
         if valves.WEB_SEARCH_USER_LOCATION:
