@@ -162,19 +162,21 @@ Below are the official model IDs that have been tested and confirmed.
 These **aliases** are supported via the `MODELS` valve. They resolve to official models but may also apply presets (e.g., `reasoning_effort`).  
 Useful for **routing, shorthand, or quick quality/cost tuning**. *(Subject to change as OpenAI updates models.)*
 
-| Alias                          | Resolves To   | Preset(s)                    | Suggested Use |
-|--------------------------------|---------------|------------------------------|---------------|
-| `gpt-5-auto`                   | Dynamic GPT-5 | —                            | Automatically routes between GPT-5 chat/mini/nano. |
-| `gpt-5-thinking`               | `gpt-5`       | Medium reasoning             | General high-quality tasks. ([OpenAI][8]) |
-| `gpt-5-thinking-minimal`       | `gpt-5`       | `reasoning_effort="minimal"` | Faster/cheaper reasoning. ([OpenAI][8]) |
-| `gpt-5-thinking-high`          | `gpt-5`       | `reasoning_effort="high"`    | Hard problems; max quality. ([OpenAI][8]) |
-| `gpt-5-thinking-mini`          | `gpt-5-mini`  | Medium reasoning             | Budget-tilted reasoning. ([OpenAI Platform][9]) |
-| `gpt-5-thinking-mini-minimal`  | `gpt-5-mini`  | Minimal reasoning            | Hidden/task routing use. ([OpenAI Platform][9]) |
-| `gpt-5-thinking-nano`          | `gpt-5-nano`  | Medium reasoning             | Ultra-low cost; triage/routing. ([OpenAI Platform][10]) |
-| `gpt-5-thinking-nano-minimal`  | `gpt-5-nano`  | Minimal reasoning            | Cheapest reasoning option. ([OpenAI Platform][10]) |
-| `o3-mini-high`                 | `o3-mini`     | High reasoning effort        | Small + fast, but deeper thinking. ([OpenAI Platform][11]) |
-| `o4-mini-high`                 | `o4-mini`     | High reasoning effort        | Balanced cost-efficient + deeper thinking. ([OpenAI][12]) |
-| *(reserved)* `gpt-5-main`, `gpt-5-main-mini`, `gpt-5-thinking-pro` | — | — | Reserved placeholders; no current API models. ([OpenAI][8]) |
+| Alias                                                              | Resolves To   | Preset(s)                    | Suggested Use                                                    |
+| ------------------------------------------------------------------ | ------------- | ---------------------------- | ---------------------------------------------------------------- |
+| `gpt-5-auto`                                                       | Dynamic GPT-5 | —                            | Auto-routes between GPT-5 chat/mini/nano.                        |
+| `gpt-5-thinking`                                                   | `gpt-5`       | Medium reasoning             | General high-quality tasks. (\[OpenAI]\[8])                      |
+| `gpt-5-thinking-minimal`                                           | `gpt-5`       | `reasoning_effort="minimal"` | Faster/cheaper reasoning. (\[OpenAI]\[8])                        |
+| `gpt-5-thinking-high`                                              | `gpt-5`       | `reasoning_effort="high"`    | Hard problems; maximum quality. (\[OpenAI]\[8])                  |
+| `gpt-5-thinking-mini`                                              | `gpt-5-mini`  | Medium reasoning             | Budget-optimized reasoning. (\[OpenAI Platform]\[9])             |
+| `gpt-5-thinking-mini-minimal`                                      | `gpt-5-mini`  | `reasoning_effort="minimal"` | Lowest-cost reasoning on mini. (\[OpenAI Platform]\[9])          |
+| `gpt-5-thinking-mini-high`                                         | `gpt-5-mini`  | `reasoning_effort="high"`    | Higher-effort reasoning on mini. (\[OpenAI Platform]\[9])        |
+| `gpt-5-thinking-nano`                                              | `gpt-5-nano`  | Medium reasoning             | Ultra-cheap reasoning; routing/triage. (\[OpenAI Platform]\[10]) |
+| `gpt-5-thinking-nano-minimal`                                      | `gpt-5-nano`  | `reasoning_effort="minimal"` | Absolute cheapest reasoning. (\[OpenAI Platform]\[10])           |
+| `gpt-5-thinking-nano-high`                                         | `gpt-5-nano`  | `reasoning_effort="high"`    | High-effort reasoning at lowest tier. (\[OpenAI Platform]\[10])  |
+| `o3-mini-high`                                                     | `o3-mini`     | `reasoning_effort="high"`    | Small + fast, deeper reasoning. (\[OpenAI Platform]\[11])        |
+| `o4-mini-high`                                                     | `o4-mini`     | `reasoning_effort="high"`    | Balanced cost + deeper reasoning. (\[OpenAI]\[12])               |
+| *(reserved)* `gpt-5-main`, `gpt-5-main-mini`, `gpt-5-thinking-pro` | —             | —                            | Reserved placeholders; no current API models. (\[OpenAI]\[8])    |
 
 ---
 

@@ -81,7 +81,6 @@ class ModelFamily:
     }
 
     # Aliases/pseudos: keep base + implied params together.
-    # Note: params follow the CompletionsBody model and are later transformed to ResponsesBody format
     _ALIASES: Dict[str, Dict[str, Any]] = {
         "gpt-5-thinking":               {"base": "gpt-5"},
         "gpt-5-thinking-minimal":       {"base": "gpt-5",       "params": {"reasoning": {"effort": "minimal"}}},
@@ -89,16 +88,16 @@ class ModelFamily:
 
         "gpt-5-thinking-mini":          {"base": "gpt-5-mini"},
         "gpt-5-thinking-mini-minimal":  {"base": "gpt-5-mini",  "params": {"reasoning": {"effort": "minimal"}}},
+        "gpt-5-thinking-mini-high":     {"base": "gpt-5-mini",  "params": {"reasoning": {"effort": "high"}}},
+
 
         "gpt-5-thinking-nano":          {"base": "gpt-5-nano"},
         "gpt-5-thinking-nano-minimal":  {"base": "gpt-5-nano",  "params": {"reasoning": {"effort": "minimal"}}},
+        "gpt-5-thinking-nano-high":     {"base": "gpt-5-nano",  "params": {"reasoning": {"effort": "high"}}},
 
         # Back-compat
         "o3-mini-high":                 {"base": "o3-mini",     "params": {"reasoning": {"effort": "high"}}},
         "o4-mini-high":                 {"base": "o4-mini",     "params": {"reasoning": {"effort": "high"}}},
-        "gpt-5-main":                   {"base": "gpt-5"},
-        "gpt-5-main-mini":              {"base": "gpt-5-mini"},
-        "gpt-5-thinking-pro":           {"base": "gpt-5",       "params": {"reasoning": {"effort": "high"}}},
     }
 
     # ── tiny, intuitive helpers ──────────────────────────────────────────────
