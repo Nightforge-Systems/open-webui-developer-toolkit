@@ -48,7 +48,26 @@ from open_webui.utils.misc import get_last_user_message
 # 2. Constants & Global Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 class ModelFamily:
-    """One place for base capabilities + alias mapping (with effort defaults)."""
+    """
+    One place for base capabilities + alias mapping (with effort defaults).
+
+    Examples
+    --------
+    >>> ModelFamily.base_model("openai_responses.gpt-5-thinking-high-2025-09-05")
+    'gpt-5'
+
+    >>> ModelFamily.params("gpt-5-thinking-high")
+    {'reasoning': {'effort': 'high'}}
+
+    >>> ModelFamily.params("gpt-5")
+    {}
+
+    >>> ModelFamily.features("gpt-5-mini")
+    frozenset({'function_calling', 'reasoning', 'reasoning_summary', 'image_gen_tool', 'verbosity'})
+
+    >>> ModelFamily.supports("deep_research", "gpt-5")
+    False
+    """
 
     _DATE_RE = re.compile(r"-\d{4}-\d{2}-\d{2}$")
     _PREFIX  = "openai_responses."
@@ -80,53 +99,54 @@ class ModelFamily:
         "chatgpt-4o-latest":    {"features": {}},
     }
 
-    # Aliases/pseudos: keep base + implied params together.
+    # Aliases/pseudos
     _ALIASES: Dict[str, Dict[str, Any]] = {
-        "gpt-5-thinking":               {"base": "gpt-5"},
-        "gpt-5-thinking-minimal":       {"base": "gpt-5",       "params": {"reasoning": {"effort": "minimal"}}},
-        "gpt-5-thinking-high":          {"base": "gpt-5",       "params": {"reasoning": {"effort": "high"}}},
+        "gpt-5-thinking":               {"base_model": "gpt-5"},
+        "gpt-5-thinking-minimal":       {"base_model": "gpt-5",       "params": {"reasoning": {"effort": "minimal"}}},
+        "gpt-5-thinking-high":          {"base_model": "gpt-5",       "params": {"reasoning": {"effort": "high"}}},
 
-        "gpt-5-thinking-mini":          {"base": "gpt-5-mini"},
-        "gpt-5-thinking-mini-minimal":  {"base": "gpt-5-mini",  "params": {"reasoning": {"effort": "minimal"}}},
-        "gpt-5-thinking-mini-high":     {"base": "gpt-5-mini",  "params": {"reasoning": {"effort": "high"}}},
+        "gpt-5-thinking-mini":          {"base_model": "gpt-5-mini"},
+        "gpt-5-thinking-mini-minimal":  {"base_model": "gpt-5-mini",  "params": {"reasoning": {"effort": "minimal"}}},
+        "gpt-5-thinking-mini-high":     {"base_model": "gpt-5-mini",  "params": {"reasoning": {"effort": "high"}}},
 
-
-        "gpt-5-thinking-nano":          {"base": "gpt-5-nano"},
-        "gpt-5-thinking-nano-minimal":  {"base": "gpt-5-nano",  "params": {"reasoning": {"effort": "minimal"}}},
-        "gpt-5-thinking-nano-high":     {"base": "gpt-5-nano",  "params": {"reasoning": {"effort": "high"}}},
+        "gpt-5-thinking-nano":          {"base_model": "gpt-5-nano"},
+        "gpt-5-thinking-nano-minimal":  {"base_model": "gpt-5-nano",  "params": {"reasoning": {"effort": "minimal"}}},
+        "gpt-5-thinking-nano-high":     {"base_model": "gpt-5-nano",  "params": {"reasoning": {"effort": "high"}}},
 
         # Back-compat
-        "o3-mini-high":                 {"base": "o3-mini",     "params": {"reasoning": {"effort": "high"}}},
-        "o4-mini-high":                 {"base": "o4-mini",     "params": {"reasoning": {"effort": "high"}}},
+        "o3-mini-high":                 {"base_model": "o3-mini",     "params": {"reasoning": {"effort": "high"}}},
+        "o4-mini-high":                 {"base_model": "o4-mini",     "params": {"reasoning": {"effort": "high"}}},
     }
 
     # ── tiny, intuitive helpers ──────────────────────────────────────────────
     @classmethod
     def _norm(cls, model_id: str) -> str:
         m = (model_id or "").strip()
-        if m.startswith(cls._PREFIX): m = m[len(cls._PREFIX):]
+        if m.startswith(cls._PREFIX):
+            m = m[len(cls._PREFIX):]
         return cls._DATE_RE.sub("", m.lower())
 
     @classmethod
-    def base(cls, model_id: str) -> str:
-        """Canonical base id (aliases resolved; prefix/date stripped)."""
+    def base_model(cls, model_id: str) -> str:
+        """Canonical base model id (aliases resolved; prefix/date stripped)."""
         key = cls._norm(model_id)
-        base = cls._ALIASES.get(key, {}).get("base")
+        base = cls._ALIASES.get(key, {}).get("base_model")
         return cls._norm(base or key)
 
     @classmethod
     def params(cls, model_id: str) -> Dict[str, Any]:
-        """Alias-implied defaults (e.g., {'reasoning_effort':'high'}). Empty for base ids."""
+        """Alias-implied defaults (e.g., {'reasoning': {'effort':'high'}}). Empty for base ids."""
         key = cls._norm(model_id)
         return dict(cls._ALIASES.get(key, {}).get("params", {}))
 
     @classmethod
     def features(cls, model_id: str) -> frozenset[str]:
         """Capabilities for the base model behind this id/alias."""
-        return frozenset(cls._SPECS.get(cls.base(model_id), {}).get("features", set()))
+        return frozenset(cls._SPECS.get(cls.base_model(model_id), {}).get("features", set()))
 
     @classmethod
     def supports(cls, feature: str, model_id: str) -> bool:
+        """Check if a model (alias or base) supports a given feature."""
         return feature in cls.features(model_id)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -154,7 +174,7 @@ class ResponsesBody(BaseModel):
     input: Union[str, List[Dict[str, Any]]] # plain text, or rich array
 
     # Optional parameters
-    instructions: Optional[str] = ""              # system / developer prompt
+    instructions: Optional[str] = ""              # system prompt
     stream: bool = False                          # SSE chunking
     store: Optional[bool] = False                  # persist response on OpenAI side
     temperature: Optional[float] = None
@@ -180,7 +200,7 @@ class ResponsesBody(BaseModel):
             model="gpt-5-thinking-high" → model="gpt-5", reasoning={"effort": "high"}
         """
         orig_model = self.model or ""
-        base_model = ModelFamily.base(orig_model)
+        base_model = ModelFamily.base_model(orig_model)
         alias_defaults = ModelFamily.params(orig_model) or {}
 
         # No alias? keep as-is
@@ -336,7 +356,7 @@ class ResponsesBody(BaseModel):
 
         required_item_ids: set[str] = set()
 
-        # Gather all markers from assistant messages (if both IDs are provided)
+        # Gather all invisible markers from assistant messages (if both `chat_id` and `openwebui_model_id` are provided)
         if chat_id and openwebui_model_id:
             for m in messages:
                 if (
@@ -347,7 +367,7 @@ class ResponsesBody(BaseModel):
                     for mk in extract_markers(m["content"], parsed=True):
                         required_item_ids.add(mk["ulid"])
 
-        # Fetch persisted items if both IDs are provided and there are encoded item IDs
+        # Fetch persisted items, if invisible markers are present
         items_lookup: dict[str, dict] = {}
         if chat_id and openwebui_model_id and required_item_ids:
             items_lookup = fetch_openai_response_items(
@@ -362,7 +382,7 @@ class ResponsesBody(BaseModel):
             role = msg.get("role")
             raw_content = msg.get("content", "")
 
-            # Skip system messages; they belong in `instructions`
+            # Skip system messages; they will be mapped to `instructions` separately later in from_completions()
             if role == "system":
                 continue
 
@@ -461,7 +481,7 @@ class ResponsesBody(BaseModel):
 
             # Fields that are dropped and manually handled later in the pipe()
             "tools",
-            "extra_tools" # Not a real OpenAI parm,. Upstream filters may use it to add tools. The are appended to body["tools"] later in the pipe()
+            "extra_tools" # Not a real OpenAI parm. Upstream filters may use it to add tools. The are appended to body["tools"] later in the pipe()
         }
         sanitized_params = {}
         for key, value in completions_dict.items():
@@ -499,7 +519,7 @@ class ResponsesBody(BaseModel):
         # Build the final ResponsesBody directly
         return ResponsesBody(
             **sanitized_params,
-            **extra_params  # Overrides any parameters in sanitized_params with the same name since they are passed last
+            **extra_params  # Extra parameters that are passed to the ResponsesBody (e.g., custom parameters configured in Open WebUI model settings)
         )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -604,7 +624,7 @@ class Pipe:
 
         TRUNCATION: Literal["auto", "disabled"] = Field(
             default="auto",
-            description="Truncation strategy for model responses. 'auto' drops middle context items if the conversation exceeds the context window; 'disabled' returns a 400 error instead.",
+            description="OpenAI truncation strategy for model responses. 'auto' drops middle context items if the conversation exceeds the context window; 'disabled' returns a 400 error instead.",
         )
 
         # Privacy & caching
