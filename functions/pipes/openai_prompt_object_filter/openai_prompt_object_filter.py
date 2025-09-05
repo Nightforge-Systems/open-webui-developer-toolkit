@@ -5,6 +5,8 @@ author: OpenAI Codex
 description: Strip system messages when a Prompt Object is provided.
 version: 0.1.0
 license: MIT
+
+NOTE: THIS FILTER DOES NOT YET FUNCTION.  DO NOT USE.
 """
 from __future__ import annotations
 
