@@ -846,9 +846,9 @@ class Pipe:
             reasoning_effort = model_router_result.get("reasoning_effort", "")
 
             assistant_message = await status_indicator.add(
-            assistant_message,
-            status_title=f"Routing to {model} (effort: {reasoning_effort})",
-            status_content=f"Explanation: {model_router_result.get('explanation', '')}"
+                assistant_message,
+                status_title=f"Routing to {model} (effort: {reasoning_effort})",
+                status_content=f"Explanation: {model_router_result.get('explanation', '')}"
             )
 
 
