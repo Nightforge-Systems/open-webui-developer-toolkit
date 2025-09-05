@@ -95,8 +95,8 @@ class ModelFamily:
         "o3-deep-research":     {"features": {"function_calling","reasoning","reasoning_summary","deep_research"}},
         "o4-mini-deep-research":{"features": {"function_calling","reasoning","reasoning_summary","deep_research"}},
 
-        "gpt-5-chat-latest":    {"features": {}},
-        "chatgpt-4o-latest":    {"features": {}},
+        "gpt-5-chat-latest":    {"features": {}}, # Chat-optimized non-reasoning model does not support tool calling, or any other advanced features.
+        "chatgpt-4o-latest":    {"features": {}}, # Chat-optimized non-reasoning model does not support tool calling, or any other advanced features.
     }
 
     # Aliases/pseudos
