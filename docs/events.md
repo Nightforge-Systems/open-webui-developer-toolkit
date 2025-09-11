@@ -81,6 +81,57 @@ await __event_emitter__({
 
 *(The `done` flag can be toggled to indicate whether the process is finished. For example, set `"done": True` on the final status update.)*
 
+##### Common `status` actions
+
+Status events append entries to the message's status history. Besides a `description`, you can supply an `action` field that triggers richer UI elements in the chat:
+
+```python
+# Generic progress
+await __event_emitter__({
+    "type": "status",
+    "data": {"description": "Crunching numbers", "done": False}
+})
+
+# Web search with expandable results
+await __event_emitter__({
+    "type": "status",
+    "data": {
+        "action": "web_search",
+        "description": "Searched {{count}} sites",
+        "query": "chatgpt",
+        "items": [
+            {"title": "OpenAI", "link": "https://openai.com"},
+            {"title": "ChatGPT", "link": "https://chat.openai.com"}
+        ],
+        "done": True
+    }
+})
+
+# Knowledge base lookup
+await __event_emitter__({
+    "type": "status",
+    "data": {"action": "knowledge_search", "query": "vector db", "done": False}
+})
+
+# Query suggestions
+await __event_emitter__({
+    "type": "status",
+    "data": {
+        "action": "web_search_queries_generated",
+        "queries": ["ChatGPT", "OpenAI API"],
+        "done": False
+    }
+})
+
+# Retrieval summary
+await __event_emitter__({
+    "type": "status",
+    "data": {"action": "sources_retrieved", "count": 3, "done": True}
+})
+```
+
+Setting `"hidden": True` on a status suppresses its display in the history. The `done` flag controls the spinner beside the latest entry—leave it `False` while work is ongoing and switch to `True` when complete.
+
 ---
 
 #### ✅ Incremental Text Updates (`chat:message:delta` or `message`)
