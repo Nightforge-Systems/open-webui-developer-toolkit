@@ -1,83 +1,80 @@
-"""Status Emitter Demo.
-
-title: Status Emitter Demo
-id: status_emitter_example
-author: OpenAI Codex
-description: Demonstrates emitting diverse status actions with delays.
-version: 1.0.0
-license: MIT
+"""
+title: Status Timeline Demo (No WebSearch)
+author: ChatGPT
+version: 0.1.0
 """
 
-from __future__ import annotations
-
+from typing import Optional, Callable, Awaitable, Union
+from pydantic import BaseModel, Field
 import asyncio
-from typing import Any, AsyncGenerator, Awaitable, Callable
-
 
 class Pipe:
-    """Simple pipe that emits a variety of status events."""
+    class Valves(BaseModel):
+        STEP_DELAY_SECONDS: float = Field(
+            default=0.4, description="Delay between status updates"
+        )
+        STEPS: int = Field(
+            default=4, ge=1, le=10, description="How many demo steps to show"
+        )
+        SHOW_NOISE_STEP: bool = Field(
+            default=False, description="Emit a hidden(=True) status (debug)"
+        )
+
+    def __init__(self):
+        self.type = "pipe"
+        self.id = "status_timeline_demo_no_websearch"
+        self.name = "Status Timeline Demo (No WebSearch)"
+        self.valves = self.Valves()
+
+    async def _emit_status(self, emitter, description: str, *, done: bool = False, hidden: bool = False, action: str = "stage"):
+        """Minimal status event payload (no web_search)."""
+        if emitter:
+            await emitter({
+                "type": "status",
+                "data": {
+                    "action": action,        # any string; UI fallback renders description
+                    "description": description,
+                    "done": done,
+                    "hidden": hidden
+                }
+            })
 
     async def pipe(
         self,
-        _body: dict[str, Any],
-        __event_emitter__: Callable[[dict[str, Any]], Awaitable[None]] | None,
-        __metadata__: dict[str, Any] | None = None,
-        *_,
-    ) -> AsyncGenerator[str, None]:
-        """Emit example status events, pausing two seconds between each."""
+        body: dict,
+        __user__: Optional[dict] = None,
+        __event_emitter__: Optional[Callable[[dict], Awaitable[None]]] = None,
+        __event_call__: Optional[Callable[[dict], Awaitable[dict]]] = None,
+    ) -> Union[str, dict]:
 
-        if not __event_emitter__:
-            yield "No event emitter provided."
-            return
+        # Optional hidden/noise status (won't render but proves we can send it)
+        if self.valves.SHOW_NOISE_STEP:
+            await self._emit_status(__event_emitter__, "Internal prep…", hidden=True)
 
-        statuses = [
-            {"description": "Starting demo", "done": False},
-            {
-                "action": "web_search",
-                "description": "Searched {{count}} sites",
-                "query": "open webui",
-                "items": [
-                    {"title": "Open WebUI", "link": "https://github.com/open-webui/open-webui"},
-                    {"title": "Open WebUI Docs", "link": "https://docs.openwebui.com"},
-                ],
-                "done": True,
-            },
-            {
-                "action": "web_search",
-                "description": "Searched {{count}} sites",
-                "query": "open webui",
-                "urls": [
-                    "https://github.com/open-webui/open-webui",
-                    "https://docs.openwebui.com",
-                ],
-                "done": True,
-            },
-            {
-                "action": "knowledge_search",
-                "query": "vector database",
-                "done": False,
-            },
-            {
-                "action": "web_search_queries_generated",
-                "queries": ["Open WebUI", "status events"],
-                "done": False,
-            },
-            {
-                "action": "queries_generated",
-                "queries": ["vector search", "semantic ranking"],
-                "done": False,
-            },
-            {
-                "action": "sources_retrieved",
-                "count": 2,
-                "done": True,
-            },
-            {"description": "Hidden completion", "done": True, "hidden": True},
-            {"description": "Search failed", "done": True, "error": True},
+        # Build a simple multi-step workflow (no 'web_search' anywhere)
+        labels = [
+            "Queued job",
+            "Downloading inputs",
+            "Analyzing data",
+            "Summarizing results",
         ]
 
-        for data in statuses:
-            await __event_emitter__({"type": "status", "data": data})
-            await asyncio.sleep(2)
+        # Allow user to shorten/extend the flow via STEPS valve
+        if self.valves.STEPS < len(labels):
+            labels = labels[: self.valves.STEPS]
+        elif self.valves.STEPS > len(labels):
+            # pad extras
+            labels += [f"Extra step {i}" for i in range(len(labels)+1, self.valves.STEPS+1)]
 
-        yield "Status emitter demo complete."
+        # Emit each step as its own status item
+        for i, label in enumerate(labels):
+            is_last = (i == len(labels) - 1)
+            await self._emit_status(
+                __event_emitter__,
+                f"{label}",
+                done=is_last  # last one marked done -> stops shimmer
+            )
+            await asyncio.sleep(self.valves.STEP_DELAY_SECONDS)
+
+        # Return a normal assistant message
+        return "✅ Finished. Expand the status indicator to view all previous steps (no web_search used)."
