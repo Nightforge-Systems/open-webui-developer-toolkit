@@ -81,9 +81,31 @@ await __event_emitter__({
 
 *(The `done` flag can be toggled to indicate whether the process is finished. For example, set `"done": True` on the final status update.)*
 
-##### Common `status` actions
+Each `status` event is appended to the message's `statusHistory`. The latest entry is shown in the chat bubble and previous ones are revealed when the user expands the history. A status object may contain:
 
-Status events append entries to the message's status history. Besides a `description`, you can supply an `action` field that triggers richer UI elements in the chat:
+- **`description`** – plain-text message shown to the user.
+- **`action`** – optional enum that enables richer UI behavior.
+- **`done`** – `false` keeps a spinner next to the entry; set `true` when finished.
+- **`hidden`** – hide the entry from the UI but still store it in history.
+- **`error`** – flag an entry as an error (renders with error styling).
+
+> **UI behavior.** `StatusHistory.svelte` renders only the most recent entry (`history.at(-1)`) and toggles older entries when the user clicks the status row. There is no built‑in way to display multiple status rows simultaneously without user interaction.
+
+##### Action-specific payloads
+
+When `action` is present, additional fields tailor the UI:
+
+| Action Value                      | Extra Fields                                           | UI Effect |
+| --------------------------------- | ------------------------------------------------------ | --------- |
+| `web_search`                      | `query` + `urls` or `items`                            | Expandable list of search results |
+| `knowledge_search`                | `query`                                                | Indicates the Knowledge base is being searched |
+| `web_search_queries_generated`    | `queries`                                              | Shows which web queries were generated |
+| `queries_generated`               | `queries`                                              | Displays general query suggestions |
+| `sources_retrieved`               | `count`                                                | Reports how many sources were retrieved |
+
+Currently, **`web_search`** is the only action that renders an expandable sub‑list. It wraps the description with `WebSearchResults.svelte`, which uses a `Collapsible` to show the provided `items` or `urls`. Other actions render a single line of text.
+
+For a runnable demonstration that emits every status type with a two‑second pause, see [`functions/pipes/status_emitter_example/`](../functions/pipes/status_emitter_example/).
 
 ```python
 # Generic progress
@@ -107,6 +129,21 @@ await __event_emitter__({
     }
 })
 
+# Web search with URL list
+await __event_emitter__({
+    "type": "status",
+    "data": {
+        "action": "web_search",
+        "description": "Searched {{count}} sites",
+        "query": "chatgpt",
+        "urls": [
+            "https://openai.com",
+            "https://chat.openai.com"
+        ],
+        "done": True
+    }
+})
+
 # Knowledge base lookup
 await __event_emitter__({
     "type": "status",
@@ -123,14 +160,36 @@ await __event_emitter__({
     }
 })
 
+# General query suggestions
+await __event_emitter__({
+    "type": "status",
+    "data": {
+        "action": "queries_generated",
+        "queries": ["vector search", "semantic ranking"],
+        "done": False
+    }
+})
+
 # Retrieval summary
 await __event_emitter__({
     "type": "status",
     "data": {"action": "sources_retrieved", "count": 3, "done": True}
 })
+
+# Hidden completion (stops the spinner without adding a visible entry)
+await __event_emitter__({
+    "type": "status",
+    "data": {"description": "done", "done": True, "hidden": True}
+})
+
+# Error example
+await __event_emitter__({
+    "type": "status",
+    "data": {"description": "Search failed", "done": True, "error": True}
+})
 ```
 
-Setting `"hidden": True` on a status suppresses its display in the history. The `done` flag controls the spinner beside the latest entry—leave it `False` while work is ongoing and switch to `True` when complete.
+The `hidden` flag suppresses an entry's display in the history, while `done` controls the spinner beside the latest entry—leave it `False` while work is ongoing and switch to `True` when complete.
 
 ---
 
