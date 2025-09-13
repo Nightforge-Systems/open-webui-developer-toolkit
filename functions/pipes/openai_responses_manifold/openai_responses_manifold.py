@@ -853,6 +853,7 @@ class Pipe:
 
 
         # Send OpenAI Responses API request, parse and emit response
+        error_occurred = False
         try:
             for loop_idx in range(valves.MAX_FUNCTION_CALL_LOOPS):
                 final_response: dict[str, Any] | None = None
