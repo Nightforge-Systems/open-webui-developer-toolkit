@@ -6,7 +6,7 @@ author_url: https://github.com/jrkropp
 git_url: https://github.com/jrkropp/open-webui-developer-toolkit/blob/main/functions/pipes/openai_responses_manifold/openai_responses_manifold.py
 description: Brings OpenAI Response API support to Open WebUI, enabling features not possible via Completions API.
 required_open_webui_version: 0.6.28
-version: 0.9.3
+version: 0.9.4
 license: MIT
 """
 
@@ -17,8 +17,6 @@ from __future__ import annotations
 # ─────────────────────────────────────────────────────────────────────────────
 # Standard library, third-party, and Open WebUI imports
 # Standard library imports
-import textwrap
-from typing import Tuple
 import asyncio
 import datetime
 import inspect
@@ -28,7 +26,6 @@ import os
 import re
 import sys
 import secrets
-import time
 from collections import defaultdict, deque
 from contextvars import ContextVar
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Literal, Optional, Union
@@ -289,6 +286,7 @@ class ResponsesBody(BaseModel):
         if not mcp_json or not mcp_json.strip():
             return []
 
+        error_occurred = False
         try:
             data = json.loads(mcp_json)
         except Exception as exc:                             # malformed JSON
@@ -827,29 +825,31 @@ class Pipe:
         ordinal_by_url: dict[str, int] = {}
         emitted_citations: list[dict] = []
 
-        status_indicator = ExpandableStatusIndicator(event_emitter) # Custom class for simplifying the <details> expandable status updates
-        status_indicator._done = False
-
-        # Emit initial "thinking" block:
-        # If reasoning model, write "Thinking…" to the expandable status emitter.
         if ModelFamily.supports("reasoning", body.model):
-            assistant_message = await status_indicator.add(
-                assistant_message,
-                status_title="Thinking…",
-                status_content="Reading the question and building a plan to answer it. This may take a moment.",
-            )
+            if event_emitter:
+                await event_emitter(
+                    {
+                        "type": "status",
+                        "data": {
+                            "description": "Thinking… Reading the question and building a plan to answer it. This may take a moment.",
+                        },
+                    }
+                )
 
         model_router_result = getattr(body, "model_router_result", None)
         if model_router_result:
             delattr(body, "model_router_result")
             model = model_router_result.get("model", "")
             reasoning_effort = model_router_result.get("reasoning_effort", "")
-
-            assistant_message = await status_indicator.add(
-                assistant_message,
-                status_title=f"Routing to {model} (effort: {reasoning_effort})",
-                status_content=f"Explanation: {model_router_result.get('explanation', '')}"
-            )
+            if event_emitter:
+                await event_emitter(
+                    {
+                        "type": "status",
+                        "data": {
+                            "description": f"Routing to {model} (effort: {reasoning_effort})\nExplanation: {model_router_result.get('explanation', '')}",
+                        },
+                    }
+                )
 
 
         # Send OpenAI Responses API request, parse and emit response
@@ -883,18 +883,16 @@ class Pipe:
                     if etype == "response.reasoning_summary_text.done":
                         text = (event.get("text") or "").strip()
                         if text:
-                            # Use last bolded header as the title, else fallback
                             title_match = re.findall(r"\*\*(.+?)\*\*", text)
                             title = title_match[-1].strip() if title_match else "Thinking…"
-
-                            # Remove bold markers from body
                             content = re.sub(r"\*\*(.+?)\*\*", "", text).strip()
-
-                            assistant_message = await status_indicator.add(
-                                assistant_message,
-                                status_title=f"🧠 {title}",
-                                status_content=content,
-                            )
+                            if event_emitter:
+                                await event_emitter(
+                                    {
+                                        "type": "status",
+                                        "data": {"description": f"🧠 {title}\n{content}"},
+                                    }
+                                )
                         continue
 
                     # ─── Emit annotation
@@ -951,14 +949,14 @@ class Pipe:
                         item_type = item.get("type", "")
                         item_status = item.get("status", "")
 
-                        # If type is message and status is in_progress, emit a status update
-                        if item_type == "message" and item_status == "in_progress" and len(status_indicator._items) > 0:
-                            # Emit a status update for the message
-                            assistant_message = await status_indicator.add(
-                                assistant_message,
-                                status_title="📝 Responding to the user…",
-                                status_content="",
-                            )
+                        if item_type == "message" and item_status == "in_progress":
+                            if event_emitter:
+                                await event_emitter(
+                                    {
+                                        "type": "status",
+                                        "data": {"description": "📝 Responding to the user…"},
+                                    }
+                                )
                             continue
 
                     # ─── Emit detailed tool status upon completion ────────────────────────
@@ -1034,12 +1032,9 @@ class Pipe:
                             title = None # Don't emit a title for reasoning items
 
                         # Emit the status with prepared title and detailed content
-                        if title:
-                            assistant_message = await status_indicator.add(
-                                assistant_message,
-                                status_title=title,
-                                status_content=content,
-                            )
+                        if title and event_emitter:
+                            desc = title if not content else f"{title}\n{content}"
+                            await event_emitter({"type": "status", "data": {"description": desc}})
 
                         continue
 
@@ -1079,25 +1074,27 @@ class Pipe:
                             await event_emitter({"type": "chat:message", "data": {"content": assistant_message}})
 
 
-                    # Add status indicator with sanitized result
                     for output in function_outputs:
                         result_text = wrap_code_block(output.get("output", ""))
-                        assistant_message = await status_indicator.add(
-                            assistant_message,
-                            status_title="🛠️ Received tool result",
-                            status_content=result_text,
-                        )
+                        if event_emitter:
+                            await event_emitter(
+                                {
+                                    "type": "status",
+                                    "data": {"description": f"🛠️ Received tool result\n{result_text}"},
+                                }
+                            )
                     body.input.extend(function_outputs)
                 else:
                     break
 
         # Catch any exceptions during the streaming loop and emit an error
         except Exception as e:  # pragma: no cover - network errors
+            error_occurred = True
             await self._emit_error(event_emitter, f"Error: {str(e)}", show_error_message=True, show_error_log_citation=True, done=True)
 
         finally:
-            if not status_indicator._done and status_indicator._items:
-                assistant_message = await status_indicator.finish(assistant_message)
+            if not error_occurred and event_emitter:
+                await event_emitter({"type": "status", "data": {"description": "Done", "done": True}})
 
             if valves.LOG_LEVEL != "INHERIT":
                 if event_emitter:
@@ -1146,17 +1143,16 @@ class Pipe:
         total_usage: Dict[str, Any] = {}
         reasoning_map: dict[int, str] = {}
 
-        status_indicator = ExpandableStatusIndicator(event_emitter)
-        status_indicator._done = False
-
         if ModelFamily.supports("reasoning", body.model):
-            assistant_message = await status_indicator.add(
-                assistant_message,
-                status_title="Thinking…",
-                status_content=(
-                    "Reading the question and building a plan to answer it. This may take a moment."
-                ),
-            )
+            if event_emitter:
+                await event_emitter(
+                    {
+                        "type": "status",
+                        "data": {
+                            "description": "Thinking… Reading the question and building a plan to answer it. This may take a moment.",
+                        },
+                    }
+                )
 
         try:
             for loop_idx in range(valves.MAX_FUNCTION_CALL_LOOPS):
@@ -1185,11 +1181,13 @@ class Pipe:
                             title_match = re.findall(r"\*\*(.+?)\*\*", text)
                             title = title_match[-1].strip() if title_match else "Thinking…"
                             content = re.sub(r"\*\*(.+?)\*\*", "", text).strip()
-                            assistant_message = await status_indicator.add(
-                                assistant_message,
-                                status_title="🧠 " + title,
-                                status_content=content,
-                            )
+                            if event_emitter:
+                                await event_emitter(
+                                    {
+                                        "type": "status",
+                                        "data": {"description": f"🧠 {title}\n{content}"},
+                                    }
+                                )
 
                     elif item_type == "reasoning":
                         parts = "\n\n---".join(
@@ -1248,12 +1246,9 @@ class Pipe:
                         elif item_type == "reasoning":
                             title = None
 
-                        if title:
-                            assistant_message = await status_indicator.add(
-                                assistant_message,
-                                status_title=title,
-                                status_content=content,
-                            )
+                        if title and event_emitter:
+                            desc = title if not content else f"{title}\n{content}"
+                            await event_emitter({"type": "status", "data": {"description": desc}})
 
                 usage = response.get("usage", {})
                 if usage:
@@ -1280,22 +1275,22 @@ class Pipe:
                         self.logger.debug("Persisted item: %s", hidden_uid_marker)
                         assistant_message += hidden_uid_marker
 
-                    # Add status indicator with sanitized result
                     for output in function_outputs:
                         result_text = wrap_code_block(output.get("output", ""))
-                        assistant_message = await status_indicator.add(
-                            assistant_message,
-                            status_title="🛠️ Received tool result",
-                            status_content=result_text,
-                        )
+                        if event_emitter:
+                            await event_emitter(
+                                {
+                                    "type": "status",
+                                    "data": {"description": f"🛠️ Received tool result\n{result_text}"},
+                                }
+                            )
                     body.input.extend(function_outputs)
                 else:
                     break
 
-            # Finalize output
             final_text = assistant_message.strip()
-            if not status_indicator._done and status_indicator._items:
-                final_text = await status_indicator.finish(final_text)
+            if event_emitter:
+                await event_emitter({"type": "status", "data": {"description": "Done", "done": True}})
             return final_text
 
         except Exception as e:  # pragma: no cover - network errors
@@ -1307,9 +1302,6 @@ class Pipe:
                 done=True,
             )
         finally:
-            if not status_indicator._done and status_indicator._items:
-                assistant_message = await status_indicator.finish(assistant_message)
-            # Clear logs
             logs_by_msg_id.clear()
             SessionLogger.logs.pop(SessionLogger.session_id.get(), None)
     
@@ -1610,29 +1602,6 @@ class Pipe:
             }
         )
 
-    async def _emit_status(
-        self,
-        event_emitter: Callable[[dict[str, Any]], Awaitable[None]] | None,
-        description: str,
-        *,
-        done: bool = False,
-        hidden: bool = False,
-    ) -> None:
-        """Emit a short status update to the UI.
-
-        ``hidden`` allows emitting a transient update that is not shown in the
-        conversation transcript.
-        """
-        if event_emitter is None:
-            return
-        
-        await event_emitter(
-            {
-                "type": "status",
-                "data": {"description": description, "done": done, "hidden": hidden},
-            }
-        )
-
     async def _emit_notification(
         self,
         event_emitter: Callable[[dict[str, Any]], Awaitable[None]] | None,
@@ -1831,205 +1800,6 @@ class SessionLogger:
         logger.addHandler(mem)
 
         return logger
-
-
-# 5.2 UI Status - Expandable progress block helper
-# ------------------------------------------------
-
-class ExpandableStatusIndicator:
-    """Maintain a single expandable `<details type="status">` progress block.
-
-    This helper keeps **one** collapsible status block at the top of the assistant
-    message. You can append top-level bullets and optional sub-bullets, and it
-    will re-render the full assistant message via the provided event emitter.
-
-    Thread-safety: **Not** thread-safe; one instance should service one coroutine.
-
-    Example:
-        ```python
-        status = ExpandableStatusIndicator(event_emitter=__event_emitter__)
-        msg = await status.add("", "Analyzing input")
-        msg = await status.add(msg, "Retrieving context", "Querying sources…")
-        msg = await status.update_last_status(msg, new_content="Retrieved 3 documents")
-        msg = await status.finish(msg)
-        ```
-    """
-
-    # Regex reused for fast replacement of the existing block.
-    _BLOCK_RE = re.compile(r"<details\s+type=\"status\".*?</details>", re.DOTALL | re.IGNORECASE)
-
-    def __init__(
-        self,
-        event_emitter: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
-    ) -> None:
-        """Initialize a status indicator.
-
-        Args:
-            event_emitter: Async callable to push updated assistant text:
-                `{"type": "chat:message", "data": {"content": <str>}}`.
-        """
-        self._event_emitter = event_emitter
-        self._items: List[Tuple[str, List[str]]] = []
-        self._started = time.perf_counter()
-        self._done: bool = False
-
-    # ------------------------------------------------------------------ #
-    # Public async API                                                   #
-    # ------------------------------------------------------------------ #
-
-    async def add(
-        self,
-        assistant_message: str,
-        status_title: str,
-        status_content: Optional[str] = None,
-        *,
-        emit: bool = True,
-    ) -> str:
-        """Append a bullet (and optional sub-bullet) to the status block.
-
-        If the last bullet has the same title, `status_content` is appended as
-        a sub-bullet under that title.
-
-        Args:
-            assistant_message: Current assistant message string to update.
-            status_title:      Top-level bullet title.
-            status_content:    Optional sub-bullet text.
-            emit:              If True, immediately emit the updated message.
-
-        Returns:
-            str: Updated assistant message including the status block.
-
-        Raises:
-            RuntimeError: If the indicator has already been finished.
-        """
-        self._assert_not_finished("add")
-
-        if not self._items or self._items[-1][0] != status_title:
-            self._items.append((status_title, []))
-
-        if status_content:
-            self._items[-1][1].append(status_content.strip())
-
-        return await self._render(assistant_message, emit)
-
-    async def update_last_status(
-        self,
-        assistant_message: str,
-        *,
-        new_title: Optional[str] = None,
-        new_content: Optional[str] = None,
-        emit: bool = True,
-    ) -> str:
-        """Replace the most recent bullet's title and/or its sub-bullets.
-
-        Args:
-            assistant_message: Current assistant message string to update.
-            new_title:         Replacement title for the last bullet.
-            new_content:       Replacement content (single sub-bullet).
-            emit:              If True, immediately emit the updated message.
-
-        Returns:
-            str: Updated assistant message including the status block.
-
-        Raises:
-            RuntimeError: If the indicator has already been finished.
-        """
-        self._assert_not_finished("update_last_status")
-
-        if not self._items:
-            return await self.add(assistant_message, new_title or "Status", new_content, emit=emit)
-
-        title, subs = self._items[-1]
-        if new_title:
-            title = new_title
-        if new_content is not None:
-            subs = [new_content.strip()]
-
-        self._items[-1] = (title, subs)
-        return await self._render(assistant_message, emit)
-
-    async def finish(
-        self,
-        assistant_message: str,
-        *,
-        emit: bool = True,
-    ) -> str:
-        """Mark the indicator as finished and append a timing footer.
-
-        Args:
-            assistant_message: Current assistant message string to update.
-            emit:              If True, immediately emit the updated message.
-
-        Returns:
-            str: Updated assistant message including the final status block.
-        """
-        if self._done:
-            return assistant_message
-        elapsed = time.perf_counter() - self._started
-        self._items.append((f"Finished in {elapsed:.1f} s", []))
-        self._done = True
-        return await self._render(assistant_message, emit)
-
-    # ------------------------------------------------------------------ #
-    # Rendering helpers                                                  #
-    # ------------------------------------------------------------------ #
-
-    def _assert_not_finished(self, method: str) -> None:
-        """Raise if a mutating call is made after `finish()`.
-
-        Args:
-            method: Name of the method being invoked (for error clarity).
-
-        Raises:
-            RuntimeError: If `finish()` has already been called.
-        """
-        if self._done:
-            raise RuntimeError(f"Cannot call {method}(): status indicator is already finished.")
-
-    async def _render(self, assistant_message: str, emit: bool) -> str:
-        """Render (or replace) the status block at the top of the message.
-
-        Args:
-            assistant_message: Current assistant message string to update.
-            emit:              If True, immediately emit the updated message.
-
-        Returns:
-            str: Updated assistant message including the status block.
-        """
-        block = self._render_status_block()
-        full_msg = (
-            self._BLOCK_RE.sub(lambda _: block, assistant_message, 1)
-            if self._BLOCK_RE.search(assistant_message)
-            else f"{block}{assistant_message}"
-        )
-        if emit and self._event_emitter:
-            await self._event_emitter({"type": "chat:message", "data": {"content": full_msg}})
-        return full_msg
-
-    def _render_status_block(self) -> str:
-        """Construct the markdown for the status `<details>` block.
-
-        Returns:
-            str: A `<details type="status">` block with bullets and sub-bullets.
-        """
-        lines: List[str] = []
-
-        for title, subs in self._items:
-            lines.append(f"- **{title}**")
-            for sub in subs:
-                sub_lines = sub.splitlines()
-                if sub_lines:
-                    lines.append(f"  - {sub_lines[0]}")
-                    if len(sub_lines) > 1:
-                        lines.extend(textwrap.indent("\n".join(sub_lines[1:]), "    ").splitlines())
-
-        body_md = "\n".join(lines) if lines else "_No status yet._"
-        summary = self._items[-1][0] if self._items else "Working…"
-
-        return (
-            f'<details type="status" done="{str(self._done).lower()}">\n'
-            f"<summary>{summary}</summary>\n\n{body_md}\n\n---</details>"
-        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

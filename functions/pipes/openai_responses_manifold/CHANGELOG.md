@@ -5,6 +5,9 @@ All notable changes to the OpenAI Responses Manifold pipeline are documented in 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.4] - 2025-09-26
+- Replaced custom expandable status indicator with native status emitter.
+
 ## [0.9.1] - 2025-08-28
 - Added `ENABLE_STRICT_TOOL_CALLING` valve (default: `True`). When enabled, the manifold converts Open WebUI registry tools to strict JSON Schemas and sets `strict: true` on function tools when passing to the OpenAI Responses API.
 
