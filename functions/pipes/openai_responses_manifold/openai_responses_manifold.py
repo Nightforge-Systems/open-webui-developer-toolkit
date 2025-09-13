@@ -47,23 +47,6 @@ from open_webui.utils.misc import get_last_user_message
 class ModelFamily:
     """
     One place for base capabilities + alias mapping (with effort defaults).
-
-    Examples
-    --------
-    >>> ModelFamily.base_model("openai_responses.gpt-5-thinking-high-2025-09-05")
-    'gpt-5'
-
-    >>> ModelFamily.params("gpt-5-thinking-high")
-    {'reasoning': {'effort': 'high'}}
-
-    >>> ModelFamily.params("gpt-5")
-    {}
-
-    >>> ModelFamily.features("gpt-5-mini")
-    frozenset({'function_calling', 'reasoning', 'reasoning_summary', 'image_gen_tool', 'verbosity'})
-
-    >>> ModelFamily.supports("deep_research", "gpt-5")
-    False
     """
 
     _DATE_RE = re.compile(r"-\d{4}-\d{2}-\d{2}$")
@@ -669,11 +652,11 @@ class Pipe:
         __user__: dict[str, Any],
         __request__: Request,
         __event_emitter__: Callable[[dict[str, Any]], Awaitable[None]],
+        __event_call__: Callable[[dict[str, Any]], Awaitable[Any]] | None,
         __metadata__: dict[str, Any],
         __tools__: list[dict[str, Any]] | dict[str, Any] | None,
         __task__: Optional[dict[str, Any]] = None,
         __task_body__: Optional[dict[str, Any]] = None,
-        __event_call__: Callable[[dict[str, Any]], Awaitable[Any]] | None = None,
     ) -> AsyncGenerator[str, None] | str | None:
         """Process a user request and return either a stream or final text.
 
@@ -689,6 +672,61 @@ class Pipe:
         # STEP 0: Set up session logger with session_id and log level
         SessionLogger.session_id.set(__metadata__.get("session_id", None))
         SessionLogger.log_level.set(getattr(logging, valves.LOG_LEVEL.upper(), logging.INFO))
+
+        # ------------------------------------------------------------------
+        # BONUS: Multi-line Status Descriptions + First-line Emphasis
+        #
+        #  Open WebUI clamps each status description to one line
+        # (Tailwind `line-clamp-1`). This tiny, idempotent CSS patch:
+        #   1) Removes the clamp and enables `white-space: pre-wrap` so "\n"
+        #      render as real line breaks.
+        #   2) Adds gentle, native-feeling emphasis to the *first visual line*
+        #      using semibold (600), not full bold.
+        #
+        # Scope:
+        #   • Affects only elements under `.status-description`
+        #   • No frontend rebuild; injected at runtime via `execute`
+        #   • Runs once per tab (checks for an existing <style> tag)
+        # ------------------------------------------------------------------
+        await __event_call__({
+            "type": "execute",
+            "data": {
+                "code": """
+                (() => {
+                // Only inject once per tab
+                if (document.getElementById("owui-status-unclamp")) return "ok";
+
+                const style = document.createElement("style");
+                style.id = "owui-status-unclamp";
+
+                style.textContent = `
+                    /* Allow multi-line in the status strip */
+                    .status-description .line-clamp-1,
+                    .status-description .text-base.line-clamp-1,
+                    .status-description .text-gray-500.text-base.line-clamp-1 {
+                    display: block !important;
+                    overflow: visible !important;
+                    -webkit-line-clamp: unset !important;
+                    -webkit-box-orient: initial !important;
+                    white-space: pre-wrap !important;  /* render \\n as line breaks */
+                    word-break: break-word;
+                    }
+
+                    /* Bold the first visual line */
+                    .status-description .text-base::first-line,
+                    .status-description .text-gray-500.text-base::first-line {
+                    font-weight: 500 !important;
+                    }
+                `;
+
+                document.head.appendChild(style);
+                return "ok";
+                })();
+                """
+            }
+        })
+        # ------------------------------------------------------------------
+
 
         # STEP 1: Transform request body (Completions API -> Responses API).
         completions_body = CompletionsBody.model_validate(body)
@@ -831,7 +869,7 @@ class Pipe:
                     {
                         "type": "status",
                         "data": {
-                            "description": "Thinking… Reading the question and building a plan to answer it. This may take a moment.",
+                            "description": "Thinking...\nReading the question and building a plan to answer it. This may take a moment.",
                         },
                     }
                 )
@@ -891,7 +929,7 @@ class Pipe:
                                 await event_emitter(
                                     {
                                         "type": "status",
-                                        "data": {"description": f"🧠 {title}\n{content}"},
+                                        "data": {"description": f"{title}\n{content}"},
                                     }
                                 )
                         continue
@@ -955,7 +993,7 @@ class Pipe:
                                 await event_emitter(
                                     {
                                         "type": "status",
-                                        "data": {"description": "📝 Responding to the user…"},
+                                        "data": {"description": "Responding to the user…"},
                                     }
                                 )
                             continue
@@ -997,7 +1035,7 @@ class Pipe:
 
                         # Prepare detailed content per item_type
                         if item_type == "function_call":
-                            title = f"🛠️ Running the {item_name} tool…"
+                            title = f"Running the {item_name} tool…"
                             arguments = json.loads(item.get("arguments") or "{}")
                             args_formatted = ", ".join(f"{k}={json.dumps(v)}" for k, v in arguments.items())
                             content = wrap_code_block(f"{item_name}({args_formatted})", "python")
@@ -1081,7 +1119,7 @@ class Pipe:
                             await event_emitter(
                                 {
                                     "type": "status",
-                                    "data": {"description": f"🛠️ Received tool result\n{result_text}"},
+                                    "data": {"description": f"Received tool result\n{result_text}"},
                                 }
                             )
                     body.input.extend(function_outputs)
@@ -2319,3 +2357,27 @@ def _dedupe_tools(tools: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]
         if key[0]:
             canonical[key] = t
     return list(canonical.values())
+
+JS_UNCLAMP_STATUS = r"""
+(() => {
+  // Add once per tab (idempotent)
+  if (document.getElementById("owui-status-unclamp")) return "ok";
+  const s = document.createElement("style");
+  s.id = "owui-status-unclamp";
+  s.textContent = `
+    /* Allow multi-line in the status strip */
+    .status-description .line-clamp-1,
+    .status-description .text-base.line-clamp-1,
+    .status-description .text-gray-500.text-base.line-clamp-1 {
+      display: block !important;
+      overflow: visible !important;
+      -webkit-line-clamp: unset !important;
+      -webkit-box-orient: initial !important;
+      white-space: pre-wrap !important;  /* show \n as line breaks */
+      word-break: break-word;
+    }
+  `;
+  document.head.appendChild(s);
+  return "ok";
+})();
+"""

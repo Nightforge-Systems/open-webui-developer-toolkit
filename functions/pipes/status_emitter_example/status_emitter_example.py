@@ -198,21 +198,33 @@ class Pipe:
         })
 
         # ------------------------------------------------------------------
-        # 11) BONUS: enable MULTI-LINE status descriptions (no rebuild)
-        #     We inject a tiny CSS rule into the current tab so \n show up
-        #     as real line breaks inside the status description.
+        # BONUS: Multi-line Status Descriptions
+        #
+        # By default, Open WebUI clamps status description text to one line
+        # (`line-clamp-1`). This CSS patch removes the clamp and enables
+        # `white-space: pre-wrap`, so `\n` show as real line breaks.
+        #
+        # Additionally, it uses the ::first-line pseudo-element to make the
+        # first visual line of each status description bold for emphasis.
+        #
+        # Key points:
+        #   • Runs once per tab (idempotent: checks for existing <style>).
+        #   • Safe: only affects `.status-description` nodes.
+        #   • Requires no frontend rebuild; works immediately at runtime.
         # ------------------------------------------------------------------
         if self.valves.ENABLE_MULTILINE_PATCH and __event_call__ is not None:
             await __event_call__({
                 "type": "execute",
                 "data": {
-                "code": """
+                    "code": """
                     (() => {
-                    // Add once per tab (idempotent)
+                    // Only inject once per tab
                     if (document.getElementById("owui-status-unclamp")) return "ok";
-                    const s = document.createElement("style");
-                    s.id = "owui-status-unclamp";
-                    s.textContent = `
+
+                    const style = document.createElement("style");
+                    style.id = "owui-status-unclamp";
+
+                    style.textContent = `
                         /* Allow multi-line in the status strip */
                         .status-description .line-clamp-1,
                         .status-description .text-base.line-clamp-1,
@@ -221,14 +233,21 @@ class Pipe:
                         overflow: visible !important;
                         -webkit-line-clamp: unset !important;
                         -webkit-box-orient: initial !important;
-                        white-space: pre-wrap !important;  /* show \\n as line breaks */
+                        white-space: pre-wrap !important;  /* render \\n as line breaks */
                         word-break: break-word;
                         }
+
+                        /* Bold the first visual line */
+                        .status-description .text-base::first-line,
+                        .status-description .text-gray-500.text-base::first-line {
+                        font-weight: 700 !important;
+                        }
                     `;
-                    document.head.appendChild(s);
+
+                    document.head.appendChild(style);
                     return "ok";
                     })();
-                """
+                    """
                 }
             })
 
