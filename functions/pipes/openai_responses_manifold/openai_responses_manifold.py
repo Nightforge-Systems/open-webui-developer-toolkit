@@ -6,7 +6,7 @@ author_url: https://github.com/jrkropp
 git_url: https://github.com/jrkropp/open-webui-developer-toolkit/blob/main/functions/pipes/openai_responses_manifold/openai_responses_manifold.py
 description: Brings OpenAI Response API support to Open WebUI, enabling features not possible via Completions API.
 required_open_webui_version: 0.6.28
-version: 0.9.4
+version: 0.9.5
 license: MIT
 """
 
@@ -29,6 +29,7 @@ import secrets
 from time import perf_counter
 from collections import defaultdict, deque
 from contextvars import ContextVar
+import contextlib
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Literal, Optional, Union
 from urllib.parse import urlparse
 
@@ -863,18 +864,23 @@ class Pipe:
         total_usage: dict[str, Any] = {}
         ordinal_by_url: dict[str, int] = {}
         emitted_citations: list[dict] = []
-        start_time = perf_counter()
 
-        if ModelFamily.supports("reasoning", body.model):
-            if event_emitter:
-                await event_emitter(
-                    {
-                        "type": "status",
-                        "data": {
-                            "description": "Thinking...\nReading the question and building a plan to answer it. This may take a moment.",
-                        },
-                    }
-                )
+        thinking_tasks: list[asyncio.Task] = []
+        if ModelFamily.supports("reasoning", body.model) and event_emitter:
+            async def _later(delay: float, msg: str) -> None:
+                await asyncio.sleep(delay)
+                await event_emitter({"type": "status", "data": {"description": msg}})
+
+            thinking_tasks = [
+                asyncio.create_task(_later(0, "Thinking…")),
+                asyncio.create_task(_later(1.5, "Reading the question and building a plan.")),
+                asyncio.create_task(_later(3.0, "Gathering my thoughts.")),
+            ]
+
+        def cancel_thinking() -> None:
+            for t in thinking_tasks:
+                t.cancel()
+            thinking_tasks.clear()
 
         model_router_result = getattr(body, "model_router_result", None)
         if model_router_result:
@@ -882,6 +888,7 @@ class Pipe:
             model = model_router_result.get("model", "")
             reasoning_effort = model_router_result.get("reasoning_effort", "")
             if event_emitter:
+                cancel_thinking()
                 await event_emitter(
                     {
                         "type": "status",
@@ -891,6 +898,7 @@ class Pipe:
                     }
                 )
 
+        start_time = perf_counter()
 
         # Send OpenAI Responses API request, parse and emit response
         error_occurred = False
@@ -916,8 +924,9 @@ class Pipe:
                         delta = event.get("delta", "")
                         if delta:
                             assistant_message += delta
-                            await event_emitter({"type": "chat:message",
-                                                 "data": {"content": assistant_message}})
+                            if thinking_tasks:
+                                cancel_thinking()
+                            await event_emitter({"type": "chat:message", "data": {"content": assistant_message}})
                         continue
 
                     # ─── Reasoning summary -> status indicator (done only) ───────────────────────
@@ -928,6 +937,8 @@ class Pipe:
                             title = title_match[-1].strip() if title_match else "Thinking…"
                             content = re.sub(r"\*\*(.+?)\*\*", "", text).strip()
                             if event_emitter:
+                                if thinking_tasks:
+                                    cancel_thinking()
                                 await event_emitter(
                                     {
                                         "type": "status",
@@ -963,6 +974,8 @@ class Pipe:
                                     "date_accessed": datetime.date.today().isoformat(),
                                 }],
                             }
+                            if thinking_tasks:
+                                cancel_thinking()
                             await event_emitter({"type": "source", "data": citation_payload})
                             emitted_citations.append(citation_payload)
 
@@ -1075,6 +1088,8 @@ class Pipe:
                         # Emit the status with prepared title and detailed content
                         if title and event_emitter:
                             desc = title if not content else f"{title}\n{content}"
+                            if thinking_tasks:
+                                cancel_thinking()
                             await event_emitter({"type": "status", "data": {"description": desc}})
 
                         continue
@@ -1112,12 +1127,16 @@ class Pipe:
                         self.logger.debug("Persisted item: %s", hidden_uid_marker)
                         if hidden_uid_marker:
                             assistant_message += hidden_uid_marker
+                            if thinking_tasks:
+                                cancel_thinking()
                             await event_emitter({"type": "chat:message", "data": {"content": assistant_message}})
 
 
                     for output in function_outputs:
                         result_text = wrap_code_block(output.get("output", ""))
                         if event_emitter:
+                            if thinking_tasks:
+                                cancel_thinking()
                             await event_emitter(
                                 {
                                     "type": "status",
@@ -1134,13 +1153,17 @@ class Pipe:
             await self._emit_error(event_emitter, f"Error: {str(e)}", show_error_message=True, show_error_log_citation=True, done=True)
 
         finally:
+            cancel_thinking()
+            for t in thinking_tasks:
+                with contextlib.suppress(Exception):
+                    await t
             if not error_occurred and event_emitter:
                 elapsed = perf_counter() - start_time
                 await event_emitter(
                     {
                         "type": "status",
                         "data": {
-                            "description": f"Thought for {elapsed:.1f} seconds",
+                            "description": f"Processed in {elapsed:.1f} seconds",
                             "done": True,
                         },
                     }
@@ -1192,18 +1215,24 @@ class Pipe:
         assistant_message = ""
         total_usage: Dict[str, Any] = {}
         reasoning_map: dict[int, str] = {}
-        start_time = perf_counter()
+        thinking_tasks: list[asyncio.Task] = []
+        if ModelFamily.supports("reasoning", body.model) and event_emitter:
+            async def _later(delay: float, msg: str) -> None:
+                await asyncio.sleep(delay)
+                await event_emitter({"type": "status", "data": {"description": msg}})
 
-        if ModelFamily.supports("reasoning", body.model):
-            if event_emitter:
-                await event_emitter(
-                    {
-                        "type": "status",
-                        "data": {
-                            "description": "Thinking… Reading the question and building a plan to answer it. This may take a moment.",
-                        },
-                    }
-                )
+            thinking_tasks = [
+                asyncio.create_task(_later(0, "Thinking…")),
+                asyncio.create_task(_later(1.5, "Reading the question and building a plan.")),
+                asyncio.create_task(_later(3.0, "Gathering my thoughts.")),
+            ]
+
+        def cancel_thinking() -> None:
+            for t in thinking_tasks:
+                t.cancel()
+            thinking_tasks.clear()
+
+        start_time = perf_counter()
 
         try:
             for loop_idx in range(valves.MAX_FUNCTION_CALL_LOOPS):
@@ -1212,6 +1241,7 @@ class Pipe:
                     api_key=valves.API_KEY,
                     base_url=valves.BASE_URL,
                 )
+                cancel_thinking()
 
                 items = response.get("output", [])
 
@@ -1346,7 +1376,7 @@ class Pipe:
                     {
                         "type": "status",
                         "data": {
-                            "description": f"Thought for {elapsed:.1f} seconds",
+                            "description": f"Processed in {elapsed:.1f} seconds",
                             "done": True,
                         },
                     }
@@ -1354,6 +1384,7 @@ class Pipe:
             return final_text
 
         except Exception as e:  # pragma: no cover - network errors
+            cancel_thinking()
             await self._emit_error(
                 event_emitter,
                 e,
@@ -1362,6 +1393,9 @@ class Pipe:
                 done=True,
             )
         finally:
+            for t in thinking_tasks:
+                with contextlib.suppress(Exception):
+                    await t
             logs_by_msg_id.clear()
             SessionLogger.logs.pop(SessionLogger.session_id.get(), None)
     
@@ -1549,7 +1583,6 @@ class Pipe:
             }
             for call, result in zip(calls, results)
         ]
-
     # 4.7 Emitters (Front-end communication)
     async def _emit_error(
         self,

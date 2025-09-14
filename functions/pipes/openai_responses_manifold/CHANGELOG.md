@@ -5,6 +5,10 @@ All notable changes to the OpenAI Responses Manifold pipeline are documented in 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.5] - 2025-09-27
+- Added progressive thinking status updates that appear before the first reasoning summary.
+- Replaced the final "Done" notice with a duration-based "Processed in N seconds" message.
+
 ## [0.9.4] - 2025-09-26
 - Replaced custom expandable status indicator with native status emitter.
 
