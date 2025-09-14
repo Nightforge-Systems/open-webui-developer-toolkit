@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import secrets
+from time import perf_counter
 from collections import defaultdict, deque
 from contextvars import ContextVar
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Literal, Optional, Union
@@ -862,6 +863,7 @@ class Pipe:
         total_usage: dict[str, Any] = {}
         ordinal_by_url: dict[str, int] = {}
         emitted_citations: list[dict] = []
+        start_time = perf_counter()
 
         if ModelFamily.supports("reasoning", body.model):
             if event_emitter:
@@ -1133,7 +1135,16 @@ class Pipe:
 
         finally:
             if not error_occurred and event_emitter:
-                await event_emitter({"type": "status", "data": {"description": "Done", "done": True}})
+                elapsed = perf_counter() - start_time
+                await event_emitter(
+                    {
+                        "type": "status",
+                        "data": {
+                            "description": f"Thought for {elapsed:.1f} seconds",
+                            "done": True,
+                        },
+                    }
+                )
 
             if valves.LOG_LEVEL != "INHERIT":
                 if event_emitter:
@@ -1181,6 +1192,7 @@ class Pipe:
         assistant_message = ""
         total_usage: Dict[str, Any] = {}
         reasoning_map: dict[int, str] = {}
+        start_time = perf_counter()
 
         if ModelFamily.supports("reasoning", body.model):
             if event_emitter:
@@ -1329,7 +1341,16 @@ class Pipe:
 
             final_text = assistant_message.strip()
             if event_emitter:
-                await event_emitter({"type": "status", "data": {"description": "Done", "done": True}})
+                elapsed = perf_counter() - start_time
+                await event_emitter(
+                    {
+                        "type": "status",
+                        "data": {
+                            "description": f"Thought for {elapsed:.1f} seconds",
+                            "done": True,
+                        },
+                    }
+                )
             return final_text
 
         except Exception as e:  # pragma: no cover - network errors
