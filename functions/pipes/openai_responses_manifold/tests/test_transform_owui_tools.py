@@ -13,11 +13,6 @@ sys.modules.setdefault(
     "open_webui.models.models",
     types.SimpleNamespace(ModelForm=object, Models=object),
 )
-sys.modules.setdefault("open_webui.utils", types.ModuleType("open_webui.utils"))
-sys.modules.setdefault(
-    "open_webui.utils.misc",
-    types.SimpleNamespace(get_last_user_message=lambda messages: messages[-1] if messages else {}),
-)
 
 from functions.pipes.openai_responses_manifold.openai_responses_manifold import ResponsesBody
 
