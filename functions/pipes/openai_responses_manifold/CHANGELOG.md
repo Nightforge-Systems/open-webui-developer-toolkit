@@ -5,6 +5,15 @@ All notable changes to the OpenAI Responses Manifold pipeline are documented in 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.8] - 2025-09-30
+- Refined status sequence with mixed first-person wording, added "Exploring possible answers…" and "Almost done…", and kept router notices from cancelling thinking updates.
+
+## [0.9.7] - 2025-09-29
+- Polished progressive status wording with first-person voice, added random delays, and end with "Thought for N seconds" summary.
+
+## [0.9.6] - 2025-09-28
+- Expanded progressive thinking updates with additional status messages and clearer intervals.
+
 ## [0.9.5] - 2025-09-27
 - Added progressive thinking status updates that appear before the first reasoning summary.
 - Replaced the final "Done" notice with a duration-based "Processed in N seconds" message.

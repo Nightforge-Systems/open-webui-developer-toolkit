@@ -6,7 +6,7 @@ author_url: https://github.com/jrkropp
 git_url: https://github.com/jrkropp/open-webui-developer-toolkit/blob/main/functions/pipes/openai_responses_manifold/openai_responses_manifold.py
 description: Brings OpenAI Response API support to Open WebUI, enabling features not possible via Completions API.
 required_open_webui_version: 0.6.28
-version: 0.9.5
+version: 0.9.7
 license: MIT
 """
 
@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import secrets
+import random
 from time import perf_counter
 from collections import defaultdict, deque
 from contextvars import ContextVar
@@ -871,11 +872,17 @@ class Pipe:
                 await asyncio.sleep(delay)
                 await event_emitter({"type": "status", "data": {"description": msg}})
 
-            thinking_tasks = [
-                asyncio.create_task(_later(0, "Thinking…")),
-                asyncio.create_task(_later(1.5, "Reading the question and building a plan.")),
-                asyncio.create_task(_later(3.0, "Gathering my thoughts.")),
-            ]
+            thinking_tasks = []
+            for delay, msg in [
+                (0, "Thinking…"),
+                (1.5, "Reading the question and building a plan."),
+                (3.0, "Gathering my thoughts…"),
+                (4.5, "Exploring possible answers…"),
+                (6.5, "Almost done…"),
+            ]:
+                thinking_tasks.append(
+                    asyncio.create_task(_later(delay + random.uniform(0, 0.5), msg))
+                )
 
         def cancel_thinking() -> None:
             for t in thinking_tasks:
@@ -888,7 +895,6 @@ class Pipe:
             model = model_router_result.get("model", "")
             reasoning_effort = model_router_result.get("reasoning_effort", "")
             if event_emitter:
-                cancel_thinking()
                 await event_emitter(
                     {
                         "type": "status",
@@ -1163,7 +1169,7 @@ class Pipe:
                     {
                         "type": "status",
                         "data": {
-                            "description": f"Processed in {elapsed:.1f} seconds",
+                            "description": f"Thought for {elapsed:.1f} seconds",
                             "done": True,
                         },
                     }
@@ -1221,11 +1227,17 @@ class Pipe:
                 await asyncio.sleep(delay)
                 await event_emitter({"type": "status", "data": {"description": msg}})
 
-            thinking_tasks = [
-                asyncio.create_task(_later(0, "Thinking…")),
-                asyncio.create_task(_later(1.5, "Reading the question and building a plan.")),
-                asyncio.create_task(_later(3.0, "Gathering my thoughts.")),
-            ]
+            thinking_tasks = []
+            for delay, msg in [
+                (0, "I'm thinking…"),
+                (1.5, "I'm reading your question and planning my approach."),
+                (3.0, "I'm gathering my thoughts."),
+                (5.0, "I'm exploring a few options."),
+                (8.0, "I'm wrapping things up…"),
+            ]:
+                thinking_tasks.append(
+                    asyncio.create_task(_later(delay + random.uniform(0, 0.5), msg))
+                )
 
         def cancel_thinking() -> None:
             for t in thinking_tasks:
@@ -1376,7 +1388,7 @@ class Pipe:
                     {
                         "type": "status",
                         "data": {
-                            "description": f"Processed in {elapsed:.1f} seconds",
+                            "description": f"Thought for {elapsed:.1f} seconds",
                             "done": True,
                         },
                     }
