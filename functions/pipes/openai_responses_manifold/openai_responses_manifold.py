@@ -1023,13 +1023,19 @@ class Pipe:
                         if item_type in ("message"):
                             continue
 
-                        # Persist all non-message items.
-                        # If it's a reasoning item, only persist when PERSIST_REASONING_TOKENS is chat
+                        # Decide persistence policy
                         should_persist = False
                         if item_type == "reasoning":
-                            should_persist = (valves.PERSIST_REASONING_TOKENS == "conversation") # Only persist reasoning when explicitly allowed for this turn
-                        elif item_type != "message":
-                            should_persist = valves.PERSIST_TOOL_RESULTS # Persist all other non-message items (tool calls, web_search_call, etc.)
+                            # Persist reasoning only when explicitly allowed
+                            should_persist = valves.PERSIST_REASONING_TOKENS == "conversation"
+
+                        elif item_type in ("message", "web_search_call"):
+                            # Never persist assistant/user messages or ephemeral search calls
+                            should_persist = False
+
+                        else:
+                            # Persist all other non-message items if valve enabled
+                            should_persist = valves.PERSIST_TOOL_RESULTS
 
                         if should_persist:
                             hidden_uid_marker = persist_openai_response_items(
