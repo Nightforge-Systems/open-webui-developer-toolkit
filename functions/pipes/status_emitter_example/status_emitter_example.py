@@ -36,6 +36,45 @@ class Pipe:
         # For demo pacing (lets you see each status appear)
         D = self.valves.STEP_DELAY_SECONDS
 
+        if self.valves.ENABLE_MULTILINE_PATCH and __event_call__ is not None:
+            await __event_call__({
+                "type": "execute",
+                "data": {
+                    "code": """
+                    (() => {
+                    // Only inject once per tab
+                    if (document.getElementById("owui-status-unclamp")) return "ok";
+
+                    const style = document.createElement("style");
+                    style.id = "owui-status-unclamp";
+
+                    style.textContent = `
+                        /* Allow multi-line in the status strip */
+                        .status-description .line-clamp-1,
+                        .status-description .text-base.line-clamp-1,
+                        .status-description .text-gray-500.text-base.line-clamp-1 {
+                        display: block !important;
+                        overflow: visible !important;
+                        -webkit-line-clamp: unset !important;
+                        -webkit-box-orient: initial !important;
+                        white-space: pre-wrap !important;  /* render \\n as line breaks */
+                        word-break: break-word;
+                        }
+
+                        /* Bold the first visual line */
+                        .status-description .text-base::first-line,
+                        .status-description .text-gray-500.text-base::first-line {
+                        font-weight: 500 !important;
+                        }
+                    `;
+
+                    document.head.appendChild(style);
+                    return "ok";
+                    })();
+                    """
+                }
+            })
+
         # -----------------------------------------------------------
         # 1) Plain pending line — shimmer + ping shows it's in-flight
         # -----------------------------------------------------------
@@ -213,44 +252,6 @@ class Pipe:
         #   • Requires no frontend rebuild; works immediately at runtime.
         # ------------------------------------------------------------------
         if self.valves.ENABLE_MULTILINE_PATCH and __event_call__ is not None:
-            await __event_call__({
-                "type": "execute",
-                "data": {
-                    "code": """
-                    (() => {
-                    // Only inject once per tab
-                    if (document.getElementById("owui-status-unclamp")) return "ok";
-
-                    const style = document.createElement("style");
-                    style.id = "owui-status-unclamp";
-
-                    style.textContent = `
-                        /* Allow multi-line in the status strip */
-                        .status-description .line-clamp-1,
-                        .status-description .text-base.line-clamp-1,
-                        .status-description .text-gray-500.text-base.line-clamp-1 {
-                        display: block !important;
-                        overflow: visible !important;
-                        -webkit-line-clamp: unset !important;
-                        -webkit-box-orient: initial !important;
-                        white-space: pre-wrap !important;  /* render \\n as line breaks */
-                        word-break: break-word;
-                        }
-
-                        /* Bold the first visual line */
-                        .status-description .text-base::first-line,
-                        .status-description .text-gray-500.text-base::first-line {
-                        font-weight: 700 !important;
-                        }
-                    `;
-
-                    document.head.appendChild(style);
-                    return "ok";
-                    })();
-                    """
-                }
-            })
-
             # Now emit a demonstration status that contains explicit newlines.
             await asyncio.sleep(0.2)
             await __event_emitter__({
@@ -263,9 +264,22 @@ class Pipe:
                         "• Plan safe rollout\n\n"
                         "Expected: AvailableReplicas == DesiredReplicas"
                     ),
-                    "done": True
+                    "done": False
                 }
             })
+
+            # Emit final status done message
+            await asyncio.sleep(D)
+            await __event_emitter__({
+                "type": "status",
+                "data": {
+                    "description": "All steps complete ✅",
+                    "done": True,
+                }
+            })
+        # -----------------------------------------------------------
+
+
 
         # The assistant message body (the bubble under the strip)
         return (

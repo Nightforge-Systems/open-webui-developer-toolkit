@@ -60,8 +60,8 @@ class ModelFamily:
         "gpt-5-auto":           {"features": {"function_calling","reasoning","reasoning_summary","web_search_tool","image_gen_tool","verbosity"}},
 
         "gpt-5":                {"features": {"function_calling","reasoning","reasoning_summary","web_search_tool","image_gen_tool","verbosity"}},
-        "gpt-5-mini":           {"features": {"function_calling","reasoning","reasoning_summary","image_gen_tool","verbosity"}},
-        "gpt-5-nano":           {"features": {"function_calling","reasoning","reasoning_summary","image_gen_tool","verbosity"}},
+        "gpt-5-mini":           {"features": {"function_calling","reasoning","reasoning_summary","web_search_tool","image_gen_tool","verbosity"}},
+        "gpt-5-nano":           {"features": {"function_calling","reasoning","reasoning_summary","web_search_tool","image_gen_tool","verbosity"}},
 
         "gpt-4.1":              {"features": {"function_calling","web_search_tool","image_gen_tool"}},
         "gpt-4.1-mini":         {"features": {"function_calling","web_search_tool","image_gen_tool"}},
@@ -807,11 +807,12 @@ class Pipe:
              if "reasoning.encrypted_content" not in responses_body.include:
                  responses_body.include.append("reasoning.encrypted_content")
 
-        # If web_search too is present in responses_body.tools, Always add include: ["web_search_call.action.sources"]
-        if "web_search" in responses_body.tools and ModelFamily.supports("web_search", responses_body.model):
-            responses_body.include = responses_body.include or []
-            if "web_search_call.action.sources" not in responses_body.include:
-                responses_body.include.append("web_search_call.action.sources")
+        # If a web_search tool is present, always request sources
+        if any(isinstance(t, dict) and t.get("type") == "web_search" for t in (responses_body.tools or [])):
+            if ModelFamily.supports("web_search_tool", responses_body.model):
+                responses_body.include = list(responses_body.include or [])
+                if "web_search_call.action.sources" not in responses_body.include:
+                    responses_body.include.append("web_search_call.action.sources")
 
         # STEP 9: Map WebUI "Add Details" / "More Concise" → text.verbosity (if supported by model), then strip the stub
         input_items = responses_body.input if isinstance(responses_body.input, list) else None
@@ -892,9 +893,10 @@ class Pipe:
                 )
 
         def cancel_thinking() -> None:
-            for t in thinking_tasks:
-                t.cancel()
-            thinking_tasks.clear()
+            if thinking_tasks:
+                for t in thinking_tasks:
+                    t.cancel()
+                thinking_tasks.clear()
 
         model_router_result = getattr(body, "model_router_result", None)
         if model_router_result:
@@ -937,12 +939,10 @@ class Pipe:
                         delta = event.get("delta", "")
                         if delta:
                             assistant_message += delta
-                            if thinking_tasks:
-                                cancel_thinking()
                             await event_emitter({"type": "chat:message", "data": {"content": assistant_message}})
                         continue
 
-                    # ─── Reasoning summary -> status indicator (done only) ───────────────────────
+                    # ─── Emit reasoning summary once done ───────────────────────
                     if etype == "response.reasoning_summary_text.done":
                         text = (event.get("text") or "").strip()
                         if text:
@@ -950,8 +950,7 @@ class Pipe:
                             title = title_match[-1].strip() if title_match else "Thinking…"
                             content = re.sub(r"\*\*(.+?)\*\*", "", text).strip()
                             if event_emitter:
-                                if thinking_tasks:
-                                    cancel_thinking()
+                                cancel_thinking()
                                 await event_emitter(
                                     {
                                         "type": "status",
@@ -960,55 +959,43 @@ class Pipe:
                                 )
                         continue
 
-                    # ─── Emit annotation
+                    # ─── Citations from inline annotations (simple, no helpers) ───────────────
                     if etype == "response.output_text.annotation.added":
-                        ann = event["annotation"]
-                        url = ann.get("url", "").removesuffix("?utm_source=openai")
-                        title = ann.get("title", "").strip()
-                        domain = urlparse(url).netloc.lower().lstrip('www.')
+                        ann = event.get("annotation") or {}
+                        if ann.get("type") == "url_citation":
+                            # Basic fields
+                            url = (ann.get("url") or "").strip()
+                            if url.endswith("?utm_source=openai"):
+                                url = url[: -len("?utm_source=openai")]
+                            title = (ann.get("title") or url).strip()
 
-                        # Have we already cited this URL?
-                        already_cited = url in ordinal_by_url
+                            # Stable [n] per unique URL
+                            if url in ordinal_by_url:
+                                n = ordinal_by_url[url]
+                            else:
+                                n = len(ordinal_by_url) + 1
+                                ordinal_by_url[url] = n
 
-                        if already_cited:
-                            # Reuse the original citation number
-                            citation_number = ordinal_by_url[url]
-                        else:
-                            # Assign next available number to this new citation URL
-                            citation_number = len(ordinal_by_url) + 1
-                            ordinal_by_url[url] = citation_number
+                                # First time seeing this URL → emit a 'source' event
+                                # Minimal domain extraction (no urlparse)
+                                host = url.split("//", 1)[-1].split("/", 1)[0].lower().lstrip("www.")
+                                citation = {
+                                    "source": {"name": host or "source", "url": url},
+                                    "document": [title],
+                                    "metadata": [{
+                                        "source": url,
+                                        "date_accessed": datetime.date.today().isoformat(),
+                                    }],
+                                }
+                                await event_emitter({"type": "source", "data": citation})
+                                emitted_citations.append(citation)
 
-                            # Emit the citation event now, because it's new
-                            citation_payload = {
-                                "source": {"name": domain, "url": url},
-                                "document": [title],  # or snippet if you have it
-                                "metadata": [{
-                                    "source": url,
-                                    "date_accessed": datetime.date.today().isoformat(),
-                                }],
-                            }
-                            if thinking_tasks:
-                                cancel_thinking()
-                            await event_emitter({"type": "source", "data": citation_payload})
-                            emitted_citations.append(citation_payload)
+                            # TODO: Add support for insert citation markers.
+                            marker = f" [{n}]"
+                            end_idx = ann.get("end_index")
 
-                        # Insert the citation marker into the message text
-                        assistant_message += f" [{citation_number}]"
-
-                        # Remove the markdown link originally printed by the model
-                        assistant_message = re.sub(
-                            rf"\(\s*\[\s*{re.escape(domain)}\s*\]\([^)]+\)\s*\)",
-                            " ",
-                            assistant_message,
-                            count=1,
-                        ).strip()
-
-                        # Send updated assistant message chunk to UI
-                        await event_emitter({
-                            "type": "chat:message",
-                            "data": {"content": assistant_message},
-                        })
                         continue
+
 
                     # ─── Emit status updates for in-progress items ──────────────────────
                     if etype == "response.output_item.added":
@@ -1024,24 +1011,6 @@ class Pipe:
                                         "data": {"description": "Responding to the user…"},
                                     }
                                 )
-                            continue
-
-                        if item_type == "web_search_call":
-                            action = item.get("action", {})
-                            if action.get("type") == "search":
-                                query = action.get("query")
-                                if query and event_emitter:
-                                    await event_emitter(
-                                        {
-                                            "type": "status",
-                                            "data": {
-                                                "action": "web_search_queries_generated",
-                                                "queries": [query],
-                                                "description": "Searching",
-                                                "done": False,
-                                            },
-                                        }
-                                    )
                             continue
 
                     # ─── Emit detailed tool status upon completion ────────────────────────
@@ -1087,72 +1056,56 @@ class Pipe:
                             content = wrap_code_block(f"{item_name}({args_formatted})", "python")
 
                         elif item_type == "web_search_call":
-                            action = item.get("action", {})
+                            action = item.get("action", {}) or {}
+
                             if action.get("type") == "search":
                                 query = action.get("query")
                                 sources = action.get("sources") or []
                                 urls = [s.get("url") for s in sources if s.get("url")]
-                                if urls and event_emitter:
-                                    if thinking_tasks:
-                                        cancel_thinking()
-                                    await event_emitter(
-                                        {
+
+                                if event_emitter:
+                                    # Emit 'searching' status update along with the search query if available
+                                    if query:
+                                        await event_emitter({
                                             "type": "status",
                                             "data": {
-                                                "action": "sources_retrieved",
-                                                "description": "Retrieved {{count}} sources",
-                                                "count": len(urls),
+                                                "action": "web_search_queries_generated",
+                                                "description": "Searching",
+                                                "queries": [query],
                                                 "done": False,
                                             },
-                                        }
-                                    )
-                                    await event_emitter(
-                                        {
+                                        })
+
+                                    # If API returned sources (only when include[...] was set), emit the panel now
+                                    if urls:
+                                        await event_emitter({
                                             "type": "status",
                                             "data": {
                                                 "action": "web_search",
-                                                "description": "References • Searched {{count}} sites",
+                                                "description": "Reading through {{count}} sites",
                                                 "query": query,
                                                 "urls": urls,
-                                                "done": True,
+                                                "done": False,
                                             },
-                                        }
-                                    )
-                                elif event_emitter:
-                                    if thinking_tasks:
-                                        cancel_thinking()
-                                    await event_emitter(
-                                        {
-                                            "type": "status",
-                                            "data": {
-                                                "action": "web_search",
-                                                "description": "No search results found",
-                                                "query": query,
-                                                "done": True,
-                                                "error": True,
-                                            },
-                                        }
-                                    )
+                                        })
+
                             elif action.get("type") == "open_page":
-                                title = "🔍 Opening web page…"
-                                url = action.get("url")
-                                if url:
-                                    content = f"URL: `{url}`"
-                                if event_emitter:
-                                    if thinking_tasks:
-                                        cancel_thinking()
-                                    desc = title if not content else f"{title}\n{content}"
-                                    await event_emitter({"type": "status", "data": {"description": desc}})
+                                #TODO: emit status for open_page.  Only emitted by Deep Research models
+                                continue
+                            elif action.get("type") == "find_in_page":
+                                #TODO: emit status for find_in_page.  Only emitted by Deep Research models
+                                continue
+                                    
                             continue
 
                         elif item_type == "file_search_call":
-                            title = "📂 Let me skim those files…"
+                            title = "Let me skim those files…"
                         elif item_type == "image_generation_call":
-                            title = "🎨 Let me create that image…"
+                            title = "Let me create that image…"
                         elif item_type == "local_shell_call":
-                            title = "💻 Let me run that command…"
+                            title = "Let me run that command…"
                         elif item_type == "mcp_call":
-                            title = "🌐 Let me query the MCP server…"
+                            title = "Let me query the MCP server…"
                         elif item_type == "reasoning":
                             title = None # Don't emit a title for reasoning items
 
