@@ -780,6 +780,7 @@ class Pipe:
                 event_emitter=__event_emitter__
             )
         elif openwebui_model_id.endswith(".gpt-5-auto"):
+            responses_body.model = "gpt-5-chat-latest"
             await self._emit_notification(
                 __event_emitter__,
                 content=(
