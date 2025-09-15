@@ -272,7 +272,6 @@ class ResponsesBody(BaseModel):
         if not mcp_json or not mcp_json.strip():
             return []
 
-        error_occurred = False
         try:
             data = json.loads(mcp_json)
         except Exception as exc:                             # malformed JSON
@@ -1213,7 +1212,6 @@ class Pipe:
             await self._emit_completion(event_emitter, content="", usage=total_usage, done=True)  # There must be an empty content to avoid breaking the UI
 
             # Clear logs
-            logs_by_msg_id.clear()
             SessionLogger.logs.pop(SessionLogger.session_id.get(), None)
 
             chat_id = metadata.get("chat_id")
@@ -1694,12 +1692,6 @@ class Pipe:
 
 # 5.1 Logging & Diagnostics
 # -------------------------
-
-# In-memory store for debug logs keyed by message ID
-logs_by_msg_id: dict[str, list[str]] = defaultdict(list)
-
-# Context variable tracking the current message being processed
-current_session_id: ContextVar[str | None] = ContextVar("current_session_id", default=None)
 
 class SessionLogger:
     """Per-request logger that captures console output and an in-memory log buffer.
