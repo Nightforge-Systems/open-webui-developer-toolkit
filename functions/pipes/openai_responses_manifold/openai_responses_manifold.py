@@ -1019,6 +1019,24 @@ class Pipe:
                                 )
                             continue
 
+                        if item_type == "web_search_call":
+                            action = item.get("action", {})
+                            if action.get("type") == "search":
+                                query = action.get("query")
+                                if query and event_emitter:
+                                    await event_emitter(
+                                        {
+                                            "type": "status",
+                                            "data": {
+                                                "action": "web_search_queries_generated",
+                                                "queries": [query],
+                                                "description": "Searching",
+                                                "done": False,
+                                            },
+                                        }
+                                    )
+                            continue
+
                     # ─── Emit detailed tool status upon completion ────────────────────────
                     if etype == "response.output_item.done":
                         item = event.get("item", {})
@@ -1062,23 +1080,63 @@ class Pipe:
                             content = wrap_code_block(f"{item_name}({args_formatted})", "python")
 
                         elif item_type == "web_search_call":
-                            title = "🔍 Hmm, let me quickly check online…"
-
-                            # If action type is 'search', then set title to "🔍 Searching the web for [query]"
                             action = item.get("action", {})
                             if action.get("type") == "search":
                                 query = action.get("query")
-                                if query:
-                                    title = f"🔍 Searching the web for: `{query}`"
-                                else:
-                                    title = "🔍 Searching the web"
-
-                            # If action type is 'open_page', then set title to "🔍 Opening web page [url]"
+                                sources = action.get("sources") or []
+                                urls = [s.get("url") for s in sources if s.get("url")]
+                                if urls and event_emitter:
+                                    if thinking_tasks:
+                                        cancel_thinking()
+                                    await event_emitter(
+                                        {
+                                            "type": "status",
+                                            "data": {
+                                                "action": "sources_retrieved",
+                                                "description": "Retrieved {{count}} sources",
+                                                "count": len(urls),
+                                                "done": False,
+                                            },
+                                        }
+                                    )
+                                    await event_emitter(
+                                        {
+                                            "type": "status",
+                                            "data": {
+                                                "action": "web_search",
+                                                "description": "References • Searched {{count}} sites",
+                                                "query": query,
+                                                "urls": urls,
+                                                "done": True,
+                                            },
+                                        }
+                                    )
+                                elif event_emitter:
+                                    if thinking_tasks:
+                                        cancel_thinking()
+                                    await event_emitter(
+                                        {
+                                            "type": "status",
+                                            "data": {
+                                                "action": "web_search",
+                                                "description": "No search results found",
+                                                "query": query,
+                                                "done": True,
+                                                "error": True,
+                                            },
+                                        }
+                                    )
                             elif action.get("type") == "open_page":
                                 title = "🔍 Opening web page…"
                                 url = action.get("url")
                                 if url:
                                     content = f"URL: `{url}`"
+                                if event_emitter:
+                                    if thinking_tasks:
+                                        cancel_thinking()
+                                    desc = title if not content else f"{title}\n{content}"
+                                    await event_emitter({"type": "status", "data": {"description": desc}})
+                            continue
 
                         elif item_type == "file_search_call":
                             title = "📂 Let me skim those files…"
