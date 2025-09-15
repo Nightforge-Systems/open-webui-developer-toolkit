@@ -807,6 +807,12 @@ class Pipe:
              if "reasoning.encrypted_content" not in responses_body.include:
                  responses_body.include.append("reasoning.encrypted_content")
 
+        # If web_search too is present in responses_body.tools, Always add include: ["web_search_call.action.sources"]
+        if "web_search" in responses_body.tools and ModelFamily.supports("web_search", responses_body.model):
+            responses_body.include = responses_body.include or []
+            if "web_search_call.action.sources" not in responses_body.include:
+                responses_body.include.append("web_search_call.action.sources")
+
         # STEP 9: Map WebUI "Add Details" / "More Concise" → text.verbosity (if supported by model), then strip the stub
         input_items = responses_body.input if isinstance(responses_body.input, list) else None
         if input_items:
@@ -2316,27 +2322,3 @@ def _dedupe_tools(tools: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]
         if key[0]:
             canonical[key] = t
     return list(canonical.values())
-
-JS_UNCLAMP_STATUS = r"""
-(() => {
-  // Add once per tab (idempotent)
-  if (document.getElementById("owui-status-unclamp")) return "ok";
-  const s = document.createElement("style");
-  s.id = "owui-status-unclamp";
-  s.textContent = `
-    /* Allow multi-line in the status strip */
-    .status-description .line-clamp-1,
-    .status-description .text-base.line-clamp-1,
-    .status-description .text-gray-500.text-base.line-clamp-1 {
-      display: block !important;
-      overflow: visible !important;
-      -webkit-line-clamp: unset !important;
-      -webkit-box-orient: initial !important;
-      white-space: pre-wrap !important;  /* show \n as line breaks */
-      word-break: break-word;
-    }
-  `;
-  document.head.appendChild(s);
-  return "ok";
-})();
-"""
