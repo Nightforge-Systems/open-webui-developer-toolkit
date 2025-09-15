@@ -7,6 +7,8 @@ version: 0.1.0
 
 Note: Designed to work with the OpenAI Responses manifold
       https://github.com/jrkropp/open-webui-developer-toolkit/tree/main/functions/pipes/openai_responses_manifold
+
+THIS IS A PROOF OF CONCEPT.  IT IS CURRENTLY NOT TESTED OR OPTIMIZED.  CHECK BACK LATER.      
 """
 from __future__ import annotations
 
