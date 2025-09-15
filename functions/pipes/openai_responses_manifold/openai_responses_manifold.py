@@ -336,7 +336,6 @@ class ResponsesBody(BaseModel):
         -------
         List[dict] : The fully-formed `input` list for the OpenAI Responses API.
         """
-        DETAILS_RE = re.compile(r"<details\b[^>]*>.*?</details>|!\[.*?]\(.*?\)", re.S | re.I)
 
         required_item_ids: set[str] = set()
 
@@ -403,14 +402,8 @@ class ResponsesBody(BaseModel):
                 continue
 
             # -------- assistant message ----------------------------------- #
-            # Assistant messages might contain <details> or embedded images that need stripping
-            if "<details" in raw_content or "![" in raw_content:
-                content = DETAILS_RE.sub("", raw_content).strip()
-            else:
-                content = raw_content
-
-            if contains_marker(content):
-                for segment in split_text_by_markers(content):
+            if contains_marker(raw_content):
+                for segment in split_text_by_markers(raw_content):
                     if segment["type"] == "marker":
                         mk = parse_marker(segment["marker"])
                         item = items_lookup.get(mk["ulid"])
@@ -423,11 +416,11 @@ class ResponsesBody(BaseModel):
                         })
             else:
                 # Plain assistant text (no encoded IDs detected)
-                if content:
+                if raw_content:
                     openai_input.append(
                         {
                             "role": "assistant",
-                            "content": [{"type": "output_text", "text": content}],
+                            "content": [{"type": "output_text", "text": raw_content}],
                         }
                     )
 
@@ -1278,7 +1271,6 @@ class Pipe:
         tools = tools or {}
         assistant_message = ""
         total_usage: Dict[str, Any] = {}
-        reasoning_map: dict[int, str] = {}
         thinking_tasks: list[asyncio.Task] = []
         if ModelFamily.supports("reasoning", body.model) and event_emitter:
             async def _later(delay: float, msg: str) -> None:
@@ -1328,7 +1320,6 @@ class Pipe:
                         idx = item.get("summary_index", 0)
                         text = item.get("text", "")
                         if text:
-                            reasoning_map[idx] = reasoning_map.get(idx, "") + text
                             title_match = re.findall(r"\*\*(.+?)\*\*", text)
                             title = title_match[-1].strip() if title_match else "Thinking…"
                             content = re.sub(r"\*\*(.+?)\*\*", "", text).strip()
@@ -1341,15 +1332,7 @@ class Pipe:
                                 )
 
                     elif item_type == "reasoning":
-                        parts = "\n\n---".join(
-                            reasoning_map[i] for i in sorted(reasoning_map)
-                        )
-                        snippet = (
-                            f'<details type="{__name__}.reasoning" done="true">\n'
-                            f"<summary>Done thinking!</summary>\n{parts}</details>"
-                        )
-                        assistant_message += snippet
-                        reasoning_map.clear()
+                        continue
 
                     else:
                         if valves.PERSIST_TOOL_RESULTS:
