@@ -853,7 +853,9 @@ class Pipe:
             return await self._run_streaming_loop(responses_body, valves, __event_emitter__, __metadata__, __tools__)
         else:
             # Return final text (non-streaming)
-            return await self._run_nonstreaming_loop(responses_body, valves, __event_emitter__, __metadata__, __tools__)
+            await self._emit_error(__event_emitter__, "Non-streaming is currently not supported with the OpenAI Responses Manifold.  Please enable streaming and try again", level="warning", show_error_message=True)
+            return ""
+            #return await self._run_nonstreaming_loop(responses_body, valves, __event_emitter__, __metadata__, __tools__)
 
     # 4.3 Core Multi-Turn Handlers
     async def _run_streaming_loop(
@@ -1222,7 +1224,6 @@ class Pipe:
 
             # Return the final output to ensure persistence.
             return assistant_message
-
 
     async def _run_nonstreaming_loop(
         self,
