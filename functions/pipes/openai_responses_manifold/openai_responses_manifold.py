@@ -2082,23 +2082,6 @@ def wrap_code_block(text: str, language: str = "python") -> str:
     return f"{fence}{language}\n{text}\n{fence}"
 
 
-def remove_details_tags_by_type(text: str, removal_types: list[str]) -> str:
-    """Remove `<details>` blocks by `type` attribute from a string.
-
-    Args:
-        text:           Source text that may include `<details>` blocks.
-        removal_types:  A list of `type` attribute values to strip.
-
-    Returns:
-        str: Text with matching `<details type="...">...</details>` blocks removed.
-    """
-    # Safely escape the types in case they have special regex chars
-    pattern_types = "|".join(map(re.escape, removal_types))
-    # Example pattern: <details type="reasoning">...</details>
-    pattern = rf'<details\b[^>]*\btype=["\'](?:{pattern_types})["\'][^>]*>.*?</details>'
-    return re.sub(pattern, "", text, flags=re.IGNORECASE | re.DOTALL)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 8. Persistent Item Markers (ULIDs & encoding helpers)
 # ─────────────────────────────────────────────────────────────────────────────
