@@ -1253,205 +1253,37 @@ class Pipe:
 
     async def _run_nonstreaming_loop(
         self,
-        body: ResponsesBody,                                       # The transformed body for OpenAI Responses API
-        valves: Pipe.Valves,                                        # Contains config: MAX_FUNCTION_CALL_LOOPS, API_KEY, etc.
-        event_emitter: Callable[[Dict[str, Any]], Awaitable[None]], # Function to emit events to the front-end UI
-        metadata: Dict[str, Any] = {},                              # Metadata for the request (e.g., session_id, chat_id)
-        tools: Optional[Dict[str, Dict[str, Any]]] = None,          # Optional tools dictionary for function calls
+        body: ResponsesBody,
+        valves: Pipe.Valves,
+        event_emitter: Callable[[Dict[str, Any]], Awaitable[None]],
+        metadata: Dict[str, Any] = {},
+        tools: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> str:
-        """Multi-turn conversation loop using blocking requests.
+        """Unified implementation: reuse the streaming path.
 
-        Each iteration performs a standard POST request rather than streaming
-        SSE chunks.  The returned JSON is parsed, optional tool calls are
-        executed and the final text is accumulated before being returned.
+        We force `stream=True` and delegate to `_run_streaming_loop`, but wrap the
+        emitter so incremental `chat:message` frames are suppressed. The final
+        message text is returned (same contract as before).
         """
 
-        openwebui_model_id = metadata.get("model", {}).get("id", "") # Full model ID, e.g. "openai_responses.gpt-4o"
+        # Force SSE so we can reuse the streaming machinery
+        body.stream = True
 
-        tools = tools or {}
-        assistant_message = ""
-        total_usage: Dict[str, Any] = {}
-        thinking_tasks: list[asyncio.Task] = []
-        if ModelFamily.supports("reasoning", body.model) and event_emitter:
-            async def _later(delay: float, msg: str) -> None:
-                await asyncio.sleep(delay)
-                await event_emitter({"type": "status", "data": {"description": msg}})
+        # Pass through status / citations / usage, but do NOT emit partial text
+        wrapped_emitter = _wrap_event_emitter(
+            event_emitter,
+            suppress_chat_messages=True,
+            suppress_completion=False,
+        )
 
-            thinking_tasks = []
-            for delay, msg in [
-                (0, "I'm thinking…"),
-                (1.5, "I'm reading your question and planning my approach."),
-                (3.0, "I'm gathering my thoughts."),
-                (5.0, "I'm exploring a few options."),
-                (8.0, "I'm wrapping things up…"),
-            ]:
-                thinking_tasks.append(
-                    asyncio.create_task(_later(delay + random.uniform(0, 0.5), msg))
-                )
+        return await self._run_streaming_loop(
+            body,
+            valves,
+            wrapped_emitter,
+            metadata,
+            tools or {},
+        )
 
-        def cancel_thinking() -> None:
-            for t in thinking_tasks:
-                t.cancel()
-            thinking_tasks.clear()
-
-        start_time = perf_counter()
-
-        try:
-            for loop_idx in range(valves.MAX_FUNCTION_CALL_LOOPS):
-                response = await self.send_openai_responses_nonstreaming_request(
-                    body.model_dump(exclude_none=True),
-                    api_key=valves.API_KEY,
-                    base_url=valves.BASE_URL,
-                )
-                cancel_thinking()
-
-                items = response.get("output", [])
-
-                # Persist non-message items immediately and insert invisible markers
-                for item in items:
-                    item_type = item.get("type")
-
-                    if item_type == "message":
-                        for content in item.get("content", []):
-                            if content.get("type") == "output_text":
-                                assistant_message += content.get("text", "")
-
-                    elif item_type == "reasoning_summary_text":
-                        idx = item.get("summary_index", 0)
-                        text = item.get("text", "")
-                        if text:
-                            title_match = re.findall(r"\*\*(.+?)\*\*", text)
-                            title = title_match[-1].strip() if title_match else "Thinking…"
-                            content = re.sub(r"\*\*(.+?)\*\*", "", text).strip()
-                            if event_emitter:
-                                await event_emitter(
-                                    {
-                                        "type": "status",
-                                        "data": {"description": f"🧠 {title}\n{content}"},
-                                    }
-                                )
-
-                    elif item_type == "reasoning":
-                        continue
-
-                    else:
-                        if valves.PERSIST_TOOL_RESULTS:
-                            hidden_uid_marker = persist_openai_response_items(
-                                metadata.get("chat_id"),
-                                metadata.get("message_id"),
-                                [item],
-                                metadata.get("model", {}).get("id"),
-                            )
-                            self.logger.debug("Persisted item: %s", hidden_uid_marker)
-                            assistant_message += hidden_uid_marker
-
-                        title = f"Running `{item.get('name', 'unnamed_tool')}`"
-                        content = ""
-
-                        if item_type == "function_call":
-                            title = f"🛠️ Running the {item.get('name', 'unnamed_tool')} tool…"
-                            arguments = json.loads(item.get("arguments") or "{}")
-                            args_formatted = ", ".join(
-                                f"{k}={json.dumps(v)}" for k, v in arguments.items()
-                            )
-                            content = wrap_code_block(f"{item.get('name', 'unnamed_tool')}({args_formatted})", "python")
-                        elif item_type == "web_search_call":
-                            title = "🔍 Hmm, let me quickly check online…"
-                            action = item.get("action", {})
-                            if action.get("type") == "search":
-                                query = action.get("query")
-                                if query:
-                                    title = f"🔍 Searching the web for: `{query}`"
-                                else:
-                                    title = "🔍 Searching the web"
-                            elif action.get("type") == "open_page":
-                                title = "🔍 Opening web page…"
-                                url = action.get("url")
-                                if url:
-                                    content = f"URL: `{url}`"
-                        elif item_type == "file_search_call":
-                            title = "📂 Let me skim those files…"
-                        elif item_type == "image_generation_call":
-                            title = "🎨 Let me create that image…"
-                        elif item_type == "local_shell_call":
-                            title = "💻 Let me run that command…"
-                        elif item_type == "mcp_call":
-                            title = "🌐 Let me query the MCP server…"
-                        elif item_type == "reasoning":
-                            title = None
-
-                        if title and event_emitter:
-                            desc = title if not content else f"{title}\n{content}"
-                            await event_emitter({"type": "status", "data": {"description": desc}})
-
-                usage = response.get("usage", {})
-                if usage:
-                    usage["turn_count"] = 1
-                    usage["function_call_count"] = sum(
-                        1 for i in items if i.get("type") == "function_call"
-                    )
-                    total_usage = merge_usage_stats(total_usage, usage)
-                    await self._emit_completion(event_emitter, content="", usage=total_usage, done=False)
-
-                body.input.extend(items)
-
-                # Run tools if requested
-                calls = [i for i in items if i.get("type") == "function_call"]
-                if calls:
-                    function_outputs = await self._execute_function_calls(calls, tools)
-                    if valves.PERSIST_TOOL_RESULTS:
-                        hidden_uid_marker = persist_openai_response_items(
-                            metadata.get("chat_id"),
-                            metadata.get("message_id"),
-                            function_outputs,
-                            openwebui_model_id,
-                        )
-                        self.logger.debug("Persisted item: %s", hidden_uid_marker)
-                        assistant_message += hidden_uid_marker
-
-                    for output in function_outputs:
-                        result_text = wrap_code_block(output.get("output", ""))
-                        if event_emitter:
-                            await event_emitter(
-                                {
-                                    "type": "status",
-                                    "data": {"description": f"🛠️ Received tool result\n{result_text}"},
-                                }
-                            )
-                    body.input.extend(function_outputs)
-                else:
-                    break
-
-            final_text = assistant_message.strip()
-            if event_emitter:
-                elapsed = perf_counter() - start_time
-                await event_emitter(
-                    {
-                        "type": "status",
-                        "data": {
-                            "description": f"Thought for {elapsed:.1f} seconds",
-                            "done": True,
-                        },
-                    }
-                )
-            return final_text
-
-        except Exception as e:  # pragma: no cover - network errors
-            cancel_thinking()
-            await self._emit_error(
-                event_emitter,
-                e,
-                show_error_message=True,
-                show_error_log_citation=True,
-                done=True,
-            )
-        finally:
-            for t in thinking_tasks:
-                with contextlib.suppress(Exception):
-                    await t
-            logs_by_msg_id.clear()
-            SessionLogger.logs.pop(SessionLogger.session_id.get(), None)
-    
     # 4.4 Task Model Handling
     async def _run_task_model_request(
         self,
@@ -2023,6 +1855,35 @@ def persist_openai_response_items(
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. General-Purpose Utilities (data transforms & patches)
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _wrap_event_emitter(
+    emitter: Callable[[Dict[str, Any]], Awaitable[None]] | None,
+    *,
+    suppress_chat_messages: bool = False,
+    suppress_completion: bool = False,
+):
+    """
+    Wrap the given event emitter and optionally suppress specific event types.
+
+    Use-case: reuse the streaming loop for non-stream requests by swallowing
+    incremental 'chat:message' frames while allowing status/citation/usage
+    events through.
+    """
+    if emitter is None:
+        async def _noop(_event: Dict[str, Any]) -> None:
+            return
+
+        return _noop
+
+    async def _wrapped(event: Dict[str, Any]) -> None:
+        etype = (event or {}).get("type")
+        if suppress_chat_messages and etype == "chat:message":
+            return  # swallow incremental deltas
+        if suppress_completion and etype == "chat:completion":
+            return  # optionally swallow completion frames
+        await emitter(event)
+
+    return _wrapped
 
 def merge_usage_stats(total, new):
     """Recursively merge nested usage statistics.
