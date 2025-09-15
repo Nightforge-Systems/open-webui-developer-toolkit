@@ -670,9 +670,9 @@ class Pipe:
         SessionLogger.log_level.set(getattr(logging, valves.LOG_LEVEL.upper(), logging.INFO))
 
         # ------------------------------------------------------------------
-        # BONUS: Multi-line Status Descriptions + First-line Emphasis
+        # BONUS: Add support for Multi-line Status Descriptions (plus bold first line)
         #
-        #  Open WebUI clamps each status description to one line
+        #  Open WebUI clamps each emitted status description to one line
         # (Tailwind `line-clamp-1`). This tiny, idempotent CSS patch:
         #   1) Removes the clamp and enables `white-space: pre-wrap` so "\n"
         #      render as real line breaks.
@@ -771,13 +771,21 @@ class Pipe:
                     Models.update_model_by_id(openwebui_model_id, ModelForm(**form_data))
 
         # STEP 5: Handle GPT-5-Auto routing
-        if openwebui_model_id.endswith(".gpt-5-auto"):
+        if openwebui_model_id.endswith(".gpt-5-auto-dev"):
             responses_body = await self._route_gpt5_auto(
                 router_model="gpt-4.1-mini",
                 responses_body=responses_body,
                 tools=tools,
                 valves=valves,
                 event_emitter=__event_emitter__
+            )
+        elif openwebui_model_id.endswith(".gpt-5-auto"):
+            await self._emit_notification(
+                __event_emitter__,
+                content=(
+                    "Model router coming soon — using gpt-5-chat-latest (GPT-5 Fast)."
+                ),
+                level="warning"
             )
 
         # STEP 6: Add tools to responses body, if supported
