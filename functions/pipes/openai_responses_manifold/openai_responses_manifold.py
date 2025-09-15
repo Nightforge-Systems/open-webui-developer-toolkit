@@ -875,10 +875,10 @@ class Pipe:
             thinking_tasks = []
             for delay, msg in [
                 (0, "Thinking…"),
-                (1.5, "Reading the question and building a plan."),
-                (3.0, "Gathering my thoughts…"),
-                (4.5, "Exploring possible answers…"),
-                (6.5, "Almost done…"),
+                (1.5, "Reading the user's question…"),
+                (4.0, "Gathering my thoughts…"),
+                (6.0, "Exploring possible responses…"),
+                (7.0, "Building a plan…"),
             ]:
                 thinking_tasks.append(
                     asyncio.create_task(_later(delay + random.uniform(0, 0.5), msg))
