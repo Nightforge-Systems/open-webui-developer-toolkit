@@ -1276,6 +1276,7 @@ class Pipe:
             "instructions": body.get("instructions", ""),
             "input": body.get("input", ""),
             "stream": False,
+            "store": False,
         }
 
         response = await self.send_openai_responses_nonstreaming_request(
