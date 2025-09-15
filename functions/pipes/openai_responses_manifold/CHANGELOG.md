@@ -5,6 +5,9 @@ All notable changes to the OpenAI Responses Manifold pipeline are documented in 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.9] - 2025-10-01
+- Added status updates for OpenAI web search events, emitting query chips, source counts, and expandable result panels.
+
 ## [0.9.8] - 2025-09-30
 - Refined status sequence with mixed first-person wording, added "Exploring possible answers…" and "Almost done…", and kept router notices from cancelling thinking updates.
 
