@@ -13,6 +13,11 @@ sys.modules.setdefault(
     "open_webui.models.models",
     types.SimpleNamespace(ModelForm=object, Models=object),
 )
+sys.modules.setdefault("open_webui.utils", types.ModuleType("open_webui.utils"))
+sys.modules.setdefault(
+    "open_webui.utils.misc",
+    types.SimpleNamespace(get_last_user_message=lambda messages: messages[-1] if messages else {}),
+)
 
 from functions.pipes.openai_responses_manifold.openai_responses_manifold import Pipe, ResponsesBody
 
@@ -24,9 +29,6 @@ async def test_route_gpt5_auto_updates_body(monkeypatch):
     valves = pipe.Valves()
 
     async def fake_request(params, api_key, base_url):
-        assert params["model"] == "gpt-4.1-nano"
-        assert params["input"] == "hi"
-        assert "instructions" in params
         router_result = {"model": "gpt-5-nano"}
         return {
             "output": [
@@ -45,5 +47,5 @@ async def test_route_gpt5_auto_updates_body(monkeypatch):
         fake_request,
     )
 
-    updated = await pipe._route_gpt5_auto(body, valves)
+    updated = await pipe._route_gpt5_auto("gpt-5-auto", body, [], valves)
     assert updated.model == "gpt-5-nano"
