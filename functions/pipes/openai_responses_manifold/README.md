@@ -14,8 +14,10 @@ This project started as an internal tool (200+ hours of optimization and testing
 ## Contents
 
 * [Setup](#setup)
+* [Local Development](#local-development)
 * [Features](#features)
 * [Advanced Features](#advanced-features)
+* [Logging & Diagnostics](#logging--diagnostics)
 * [Tested Models](#tested-models)
 * [GPT‑5 Model Support](#gpt5-model-support)
 * [How It Works (Design Notes)](#how-it-works-design-notes)
@@ -47,6 +49,37 @@ This project started as an internal tool (200+ hours of optimization and testing
    <img width="800" alt="image" src="https://github.com/user-attachments/assets/ffd3dd72-cf39-43fa-be36-56c6ac41477d" />
 
 4. Done! 🎉
+
+## Local Development
+
+Open WebUI can only import a **single Python file** per pipe. To keep the codebase maintainable, everything you actually edit lives under `src/openai_responses_manifold/`. When you are ready to share your changes, run `make build` and the tooling will run tests and regenerate the monolithic `openai_responses_manifold.py` that Open WebUI expects.
+
+**Clone and bootstrap**
+
+```bash
+git clone https://github.com/jrkropp/open-webui-developer-toolkit.git
+cd open-webui-developer-toolkit/functions/pipes/openai_responses_manifold
+python -m venv .venv
+source .venv/bin/activate        # Windows: .\.venv\Scripts\activate
+make install-dev                 # editable install + dev extras (pytest, ruff, etc.)
+python -m pip install pre-commit && pre-commit install  # optional hooks (Ruff check/format + mypy)
+```
+
+**Everyday commands**
+
+```
+make test       # run pytest
+make lint       # run Ruff checks
+make lint-fix   # Ruff checks with autofix
+make format     # apply Ruff formatting fixes
+make typecheck  # run mypy against src/
+make build      # pytest + regenerate openai_responses_manifold.py for Open WebUI
+make clean      # remove build artefacts and caches
+```
+
+Use `make install` when you only need runtime dependencies (e.g., smoke-testing inside Open WebUI). Otherwise stay in editable mode, make changes in `src/`, and run `make build` whenever you need a fresh single-file bundle to copy/paste or distribute. If you ever need sdists/wheels for PyPI-style distribution, invoke `python -m build` directly.
+
+Detailed design notes and release history live under `functions/pipes/openai_responses_manifold/docs/` (`DESIGN.md`, `CHANGELOG.md`). AI handoff workpackages live in `.workpackages/`.
 
 ## Features
 
@@ -89,17 +122,6 @@ Examples:
 
 See table below for full list of aliases.
 
-### Debug logging
-
-Set `LOG_LEVEL=debug` (pipe-level or per-user valve) to embed inline debug logs in assistant messages.
-This surfaces details like:
-
-* API request/response structure
-* Tool merging behavior
-* Hidden response items
-
-Helpful for troubleshooting and understanding exactly how the manifold processes requests.
-
 ### Remote MCP servers (experimental)
 
 Attach external [Model Context Protocol (MCP)](https://platform.openai.com/docs/guides/tools-remote-mcp) servers using the `REMOTE_MCP_SERVERS_JSON` valve.
@@ -131,6 +153,20 @@ body.setdefault("extra_tools", []).append({
 ```
 
 This makes features like **on-demand web search toggles** possible without breaking native function calling.
+
+## Logging & Diagnostics
+
+Every run buffers structured log lines and attaches them to the assistant reply as a `Logs` citation. Records flow through the in-repo `SessionLogger`, so each entry automatically includes the session id plus chat/model/message metadata and remains consistent across modules (router, HTTP client, runner, tools, persistence).
+
+```
+[INFO] [session=owui-abcd chat=chat_123 model=openai_responses.gpt-5 req=gpt-5-mini msg=msg_42] Router selected model=gpt-5 (effort=medium)
+[ERROR] [session=owui-abcd chat=chat_123 model=openai_responses.gpt-5 req=gpt-5-mini msg=msg_42] invoke request failed (status=500 endpoint=https://api.openai.com/v1/responses request_id=req_123 body={"error":{"message":"invalid"}})
+```
+
+- Use `Valves.LOG_LEVEL` (pipe-level) or `UserValves.LOG_LEVEL` (per user) to control verbosity. `INHERIT` on the user valve defers to the global setting. `GLOBAL_LOG_LEVEL` continues to act as an environment override for the pipe-level valve.
+- `INFO` surfaces routing decisions, HTTP status codes, tool execution milestones, and persistence warnings; `DEBUG` adds request summaries, router payloads, and masked tool arguments; `WARNING`/`ERROR` only report failures.
+- Secrets (API keys, auth headers, tool tokens) are redacted automatically. Longer payloads are truncated so that the buffered citation stays readable.
+- When diagnosing an issue, temporarily set `LOG_LEVEL=DEBUG`, reproduce the run, grab the `Logs` citation, then drop the valve back to `INFO`/`ERROR` once finished.
 
 ## Tested Models
 The manifold should work with any model that supports the **OpenAI Responses API**.  
