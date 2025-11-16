@@ -21,7 +21,6 @@ from __future__ import annotations
 """Model capability registry and alias helpers."""
 
 
-
 import re
 from typing import Any, ClassVar
 
@@ -153,9 +152,9 @@ class ModelFamily:
         """Check if a model (alias or base) supports a given feature."""
         return feature in cls.features(model_id)
 
+
 # === openai_responses_manifold/app/pipe.py ===
 """Open WebUI pipe implementation backed by a modular runner."""
-
 
 
 import asyncio
@@ -168,13 +167,12 @@ import random
 from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from time import perf_counter
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 from fastapi import Request
 from open_webui.models.chats import Chats
 from open_webui.models.models import ModelForm, Models
 from pydantic import BaseModel, Field
-
 
 EventEmitter = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -1044,9 +1042,9 @@ class Pipe:
         }
         return global_valves.model_copy(update=update)
 
+
 # === openai_responses_manifold/core/markers.py ===
 """Helpers for encoding/decoding hidden response markers."""
-
 
 
 import re
@@ -1147,16 +1145,14 @@ def split_text_by_markers(text: str) -> list[dict[str, str]]:
         segments.append({"type": "text", "text": text[last:]})
     return segments
 
+
 # === openai_responses_manifold/core/session_logger.py ===
 """Request-scoped logger used throughout the manifold."""
 
 
-
-import logging
 import sys
-from collections import defaultdict, deque
+from collections import defaultdict
 from contextvars import ContextVar
-from typing import ClassVar
 
 
 class SessionLogger:
@@ -1196,9 +1192,9 @@ class SessionLogger:
 
         return logger
 
+
 # === openai_responses_manifold/core/utils.py ===
 """General-purpose helpers shared across modules."""
-
 
 
 from collections.abc import Awaitable, Callable
@@ -1249,17 +1245,15 @@ def wrap_code_block(text: str, language: str = "python") -> str:
 
     return f"```{language}\n{text}\n```"
 
+
 # === openai_responses_manifold/core/models.py ===
 """Pydantic request/response models and transformations."""
 
 
-
-import json
 import logging
 from typing import Any, Literal
 
 from pydantic import BaseModel, model_validator
-
 
 logger = logging.getLogger(__name__)
 
@@ -1639,16 +1633,12 @@ class ResponsesBody(BaseModel):
             **extra_params,
         )
 
+
 # === openai_responses_manifold/infra/persistence.py ===
 """Persistence helpers for storing auxiliary Responses items in Open WebUI."""
 
 
-
-import datetime
 from typing import Any
-
-from open_webui.models.chats import Chats
-
 
 
 def persist_openai_response_items(
@@ -1717,14 +1707,12 @@ def fetch_openai_response_items(
         lookup[item_id] = item.get("payload", {})
     return lookup
 
+
 # === openai_responses_manifold/infra/client.py ===
 """HTTP client for interacting with the OpenAI Responses endpoint."""
 
 
-
-import json
 import logging
-from collections.abc import AsyncGenerator
 from typing import Any
 
 import aiohttp
@@ -1825,15 +1813,13 @@ class OpenAIResponsesClient:
         )
         return self._session
 
+
 # === openai_responses_manifold/features/tools.py ===
 """Helpers for constructing OpenAI tool payloads."""
 
 
-
-import json
 import logging
 from typing import Any
-
 
 logger = logging.getLogger(__name__)
 
@@ -1911,16 +1897,14 @@ def _dedupe_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
 
     return list(seen.values())
 
+
 # === openai_responses_manifold/features/router.py ===
 """Model routing helpers (e.g., GPT-5 auto selection)."""
 
 
-
-import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
-
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ endif
 
 PIP ?= $(PYTHON) -m pip
 
-.PHONY: install install-dev test lint lint-fix format typecheck build clean
+.PHONY: install install-dev test lint lint-fix format typecheck build clean ruff-man
 
 install:
 	$(PIP) install -e .
