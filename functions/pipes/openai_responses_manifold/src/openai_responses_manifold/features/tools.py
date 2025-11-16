@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from ..core import ModelFamily, ResponsesBody
+from ..core import ResponsesBody, supports
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ def build_tools(
     """Build the OpenAI Responses-API tool spec list for this request."""
 
     features = features or {}
-    if not ModelFamily.supports("function_calling", responses_body.model):
+    if not supports("function_calling", responses_body.model):
         return []
 
     tools: list[dict[str, Any]] = []
@@ -36,7 +36,7 @@ def build_tools(
         )
 
     allow_web = (
-        ModelFamily.supports("web_search_tool", responses_body.model)
+        supports("web_search_tool", responses_body.model)
         and (getattr(valves, "ENABLE_WEB_SEARCH_TOOL", False) or features.get("web_search", False))
         and ((responses_body.reasoning or {}).get("effort", "").lower() != "minimal")
     )

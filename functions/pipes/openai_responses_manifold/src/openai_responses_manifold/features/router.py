@@ -7,7 +7,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from ..core import ModelFamily, ResponsesBody
+from ..core import ResponsesBody, supports
 from ..infra.client import OpenAIResponsesClient
 
 logger = logging.getLogger(__name__)
@@ -101,7 +101,7 @@ async def route_gpt5_auto(
         model_choice = router_json.get("model")
         if isinstance(model_choice, str):
             responses_body.model = model_choice
-        if ModelFamily.supports("reasoning", responses_body.model):
+        if supports("reasoning", responses_body.model):
             reasoning = dict(responses_body.reasoning or {})
             effort = router_json.get("reasoning_effort")
             if isinstance(effort, str):

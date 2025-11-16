@@ -79,6 +79,16 @@ make clean      # remove build artefacts and caches
 
 Use `make install` when you only need runtime dependencies (e.g., smoke-testing inside Open WebUI). Otherwise stay in editable mode, make changes in `src/`, and run `make build` whenever you need a fresh single-file bundle to copy/paste or distribute. If you ever need sdists/wheels for PyPI-style distribution, invoke `python -m build` directly.
 
+### Testing approach
+
+The pytest suite now mixes fast unit tests with scenario-style orchestrator tests:
+
+- `tests/fakes.py` provides reusable doubles (fake Responses client, spy event emitter, in-memory Chats store) so tests can drive the streaming loop without real network/database calls.
+- Scenario coverage (`tests/test_runner_scenarios.py`) exercises ResponseRunner end-to-end: streaming completions, tool loops, and error/log flushing behavior.
+- Module-focused tests (markers, request shaping, tool building, etc.) catch regressions in helpers used throughout the bundle.
+
+Run everything via `make test`. Scenario tests rely on asyncio; pytest is already configured with `asyncio` plugin, so no extra flags are needed.
+
 Detailed design notes and release history live under `functions/pipes/openai_responses_manifold/docs/` (`DESIGN.md`, `CHANGELOG.md`). AI handoff workpackages live in `.workpackages/`.
 
 ## Features

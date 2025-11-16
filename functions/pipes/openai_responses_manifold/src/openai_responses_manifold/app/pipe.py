@@ -21,10 +21,10 @@ from pydantic import BaseModel, Field
 
 from ..core import (
     CompletionsBody,
-    ModelFamily,
     ResponsesBody,
     SessionLogger,
     merge_usage_stats,
+    supports,
     wrap_code_block,
     wrap_event_emitter,
 )
@@ -121,12 +121,13 @@ class ResponseRunner:
         tools = tools or {}
         openwebui_model = metadata.get("model", {}).get("id", "")
         assistant_message = ""
+        completion_emitted = False
         total_usage: dict[str, Any] = {}
         ordinal_by_url: dict[str, int] = {}
         emitted_citations: list[dict[str, Any]] = []
 
         thinking_tasks: list[asyncio.Task[Any]] = []
-        if ModelFamily.supports("reasoning", body.model):
+        if supports("reasoning", body.model):
 
             async def _later(delay: float, msg: str) -> None:
                 await asyncio.sleep(delay)
@@ -216,6 +217,7 @@ class ResponseRunner:
                             usage=total_usage,
                             done=True,
                         )
+                        completion_emitted = True
                         cancel_thinking()
                         self.logger.info("Completed streaming in %.2f seconds", respond_time)
                         break
@@ -383,7 +385,7 @@ class ResponseRunner:
                 if error_occurred or not final_response:
                     break
 
-                if not ModelFamily.supports("function_calling", body.model):
+                if not supports("function_calling", body.model):
                     break
                 call_items = final_response.get("output", [])
                 tool_calls = [item for item in call_items if item.get("type") == "function_call"]
@@ -411,7 +413,8 @@ class ResponseRunner:
                 logs = SessionLogger.logs.get(session_id, deque())
                 if logs:
                     await self._emit_citation(event_emitter, "\n".join(logs), "Logs")
-            await self._emit_completion(event_emitter, content="", usage=total_usage, done=True)
+            if not completion_emitted:
+                await self._emit_completion(event_emitter, content="", usage=total_usage, done=True)
             SessionLogger.logs.pop(SessionLogger.session_id.get(), None)
             chat_id = metadata.get("chat_id")
             message_id = metadata.get("message_id")
@@ -781,7 +784,7 @@ class Pipe:
             extra_tools=getattr(completions_body, "extra_tools", None),
         )
 
-        if tools and ModelFamily.supports("function_calling", openwebui_model_id):
+        if tools and supports("function_calling", openwebui_model_id):
             model = Models.get_model_by_id(openwebui_model_id)
             if model:
                 params = dict(model.params or {})
@@ -813,11 +816,11 @@ class Pipe:
                 level="warning",
             )
 
-        if ModelFamily.supports("function_calling", responses_body.model):
+        if supports("function_calling", responses_body.model):
             responses_body.tools = tools
 
         if (
-            ModelFamily.supports("reasoning_summary", responses_body.model)
+            supports("reasoning_summary", responses_body.model)
             and valves.REASONING_SUMMARY != "disabled"
         ):
             reasoning_params = dict(responses_body.reasoning or {})
@@ -825,7 +828,7 @@ class Pipe:
             responses_body.reasoning = reasoning_params
 
         if (
-            ModelFamily.supports("reasoning", responses_body.model)
+            supports("reasoning", responses_body.model)
             and valves.PERSIST_REASONING_TOKENS != "disabled"
             and responses_body.store is False
         ):
@@ -837,7 +840,7 @@ class Pipe:
             isinstance(tool, dict) and tool.get("type") == "web_search"
             for tool in (responses_body.tools or [])
         ):
-            if ModelFamily.supports("web_search_tool", responses_body.model):
+            if supports("web_search_tool", responses_body.model):
                 responses_body.include = list(responses_body.include or [])
                 if "web_search_call.action.sources" not in responses_body.include:
                     responses_body.include.append("web_search_call.action.sources")
@@ -854,7 +857,7 @@ class Pipe:
             directive_to_verbosity = {"add details": "high", "more concise": "low"}
             verbosity_value = directive_to_verbosity.get(last_user_text)
 
-            if verbosity_value and ModelFamily.supports("verbosity", responses_body.model):
+            if verbosity_value and supports("verbosity", responses_body.model):
                 current_text_params = dict(getattr(responses_body, "text", {}) or {})
                 current_text_params["verbosity"] = verbosity_value
                 responses_body.text = current_text_params

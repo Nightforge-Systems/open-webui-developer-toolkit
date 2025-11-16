@@ -18,143 +18,167 @@ Use the version in the alpha-preview or main branches instead.
 from __future__ import annotations
 
 # === openai_responses_manifold/core/capabilities.py ===
-"""Model capability registry and alias helpers."""
+"""Registry for OpenAI model capabilities and pseudo-model aliases.
+
+To add support for a a new OpenAI model:
+
+* Look up the model in the OpenAI reference: https://platform.openai.com/docs/models
+* Add an entry to ``MODEL_FEATURES`` keyed by the canonical API model ID
+* (Optional) Add an entry to ``MODEL_ALIASES`` for pseudo-model shortcuts
+"""
+
 
 
 import re
-from typing import Any, ClassVar
+from copy import deepcopy
+from typing import Any
+
+MODEL_PREFIX = "openai_responses."
+DATE_SUFFIX_RE = re.compile(r"-\d{4}-\d{2}-\d{2}$")
+EMPTY_FEATURES: frozenset[str] = frozenset()
+
+# Update MODEL_FEATURES whenever OpenAI adds/removes model capabilities.
+MODEL_FEATURES: dict[str, frozenset[str]] = {
+    "gpt-5-auto": frozenset(
+        {
+            "function_calling",
+            "reasoning",
+            "reasoning_summary",
+            "web_search_tool",
+            "image_gen_tool",
+            "verbosity",
+        }
+    ),
+    "gpt-5": frozenset(
+        {
+            "function_calling",
+            "reasoning",
+            "reasoning_summary",
+            "web_search_tool",
+            "image_gen_tool",
+            "verbosity",
+        }
+    ),
+    "gpt-5-mini": frozenset(
+        {
+            "function_calling",
+            "reasoning",
+            "reasoning_summary",
+            "web_search_tool",
+            "image_gen_tool",
+            "verbosity",
+        }
+    ),
+    "gpt-5-nano": frozenset(
+        {
+            "function_calling",
+            "reasoning",
+            "reasoning_summary",
+            "web_search_tool",
+            "image_gen_tool",
+            "verbosity",
+        }
+    ),
+    "gpt-4.1": frozenset({"function_calling", "web_search_tool", "image_gen_tool"}),
+    "gpt-4.1-mini": frozenset({"function_calling", "web_search_tool", "image_gen_tool"}),
+    "gpt-4.1-nano": frozenset({"function_calling", "image_gen_tool"}),
+    "gpt-4o": frozenset({"function_calling", "web_search_tool", "image_gen_tool"}),
+    "gpt-4o-mini": frozenset({"function_calling", "web_search_tool", "image_gen_tool"}),
+    "o3": frozenset({"function_calling", "reasoning", "reasoning_summary"}),
+    "o3-mini": frozenset({"function_calling", "reasoning", "reasoning_summary"}),
+    "o3-pro": frozenset({"function_calling", "reasoning"}),
+    "o4-mini": frozenset({"function_calling", "reasoning", "reasoning_summary", "web_search_tool"}),
+    "o3-deep-research": frozenset(
+        {"function_calling", "reasoning", "reasoning_summary", "deep_research"}
+    ),
+    "o4-mini-deep-research": frozenset(
+        {"function_calling", "reasoning", "reasoning_summary", "deep_research"}
+    ),
+    "gpt-5-chat-latest": frozenset({"function_calling", "web_search_tool"}),
+    "chatgpt-4o-latest": EMPTY_FEATURES,
+}
+
+# Add entries to MODEL_ALIASES for any pseudo-model name users can pick.
+# Each alias is a preset that points to a base model and optional default params,
+# e.g. gpt-5-thinking-high -> gpt-5 with reasoning effort fixed to high.
+MODEL_ALIASES: dict[str, dict[str, Any]] = {
+    "gpt-5-thinking": {"base_model": "gpt-5"},
+    "gpt-5-thinking-minimal": {
+        "base_model": "gpt-5",
+        "params": {"reasoning": {"effort": "minimal"}},
+    },
+    "gpt-5-thinking-high": {"base_model": "gpt-5", "params": {"reasoning": {"effort": "high"}}},
+    "gpt-5-thinking-mini": {"base_model": "gpt-5-mini"},
+    "gpt-5-thinking-mini-minimal": {
+        "base_model": "gpt-5-mini",
+        "params": {"reasoning": {"effort": "minimal"}},
+    },
+    "gpt-5-thinking-mini-high": {
+        "base_model": "gpt-5-mini",
+        "params": {"reasoning": {"effort": "high"}},
+    },
+    "gpt-5-thinking-nano": {"base_model": "gpt-5-nano"},
+    "gpt-5-thinking-nano-minimal": {
+        "base_model": "gpt-5-nano",
+        "params": {"reasoning": {"effort": "minimal"}},
+    },
+    "gpt-5-thinking-nano-high": {
+        "base_model": "gpt-5-nano",
+        "params": {"reasoning": {"effort": "high"}},
+    },
+    "o3-mini-high": {"base_model": "o3-mini", "params": {"reasoning": {"effort": "high"}}},
+    "o4-mini-high": {"base_model": "o4-mini", "params": {"reasoning": {"effort": "high"}}},
+}
 
 
-class ModelFamily:
-    """Central registry of model capabilities and alias metadata."""
+def _normalize_model_id(model_id: str) -> str:
+    model = (model_id or "").strip()
+    model = model.removeprefix(MODEL_PREFIX)
+    return DATE_SUFFIX_RE.sub("", model.lower())
 
-    _DATE_RE = re.compile(r"-\d{4}-\d{2}-\d{2}$")
-    _PREFIX = "openai_responses."
 
-    _SPECS: ClassVar[dict[str, dict[str, Any]]] = {
-        "gpt-5-auto": {
-            "features": {
-                "function_calling",
-                "reasoning",
-                "reasoning_summary",
-                "web_search_tool",
-                "image_gen_tool",
-                "verbosity",
-            }
-        },
-        "gpt-5": {
-            "features": {
-                "function_calling",
-                "reasoning",
-                "reasoning_summary",
-                "web_search_tool",
-                "image_gen_tool",
-                "verbosity",
-            }
-        },
-        "gpt-5-mini": {
-            "features": {
-                "function_calling",
-                "reasoning",
-                "reasoning_summary",
-                "web_search_tool",
-                "image_gen_tool",
-                "verbosity",
-            }
-        },
-        "gpt-5-nano": {
-            "features": {
-                "function_calling",
-                "reasoning",
-                "reasoning_summary",
-                "web_search_tool",
-                "image_gen_tool",
-                "verbosity",
-            }
-        },
-        "gpt-4.1": {"features": {"function_calling", "web_search_tool", "image_gen_tool"}},
-        "gpt-4.1-mini": {"features": {"function_calling", "web_search_tool", "image_gen_tool"}},
-        "gpt-4.1-nano": {"features": {"function_calling", "image_gen_tool"}},
-        "gpt-4o": {"features": {"function_calling", "web_search_tool", "image_gen_tool"}},
-        "gpt-4o-mini": {"features": {"function_calling", "web_search_tool", "image_gen_tool"}},
-        "o3": {"features": {"function_calling", "reasoning", "reasoning_summary"}},
-        "o3-mini": {"features": {"function_calling", "reasoning", "reasoning_summary"}},
-        "o3-pro": {"features": {"function_calling", "reasoning"}},
-        "o4-mini": {
-            "features": {"function_calling", "reasoning", "reasoning_summary", "web_search_tool"}
-        },
-        "o3-deep-research": {
-            "features": {"function_calling", "reasoning", "reasoning_summary", "deep_research"}
-        },
-        "o4-mini-deep-research": {
-            "features": {"function_calling", "reasoning", "reasoning_summary", "deep_research"}
-        },
-        "gpt-5-chat-latest": {"features": {"function_calling", "web_search_tool"}},
-        "chatgpt-4o-latest": {"features": set()},
-    }
+def normalize(model_id: str) -> str:
+    """Normalize an Open WebUI model identifier by stripping prefixes and dates."""
+    return _normalize_model_id(model_id)
 
-    _ALIASES: ClassVar[dict[str, dict[str, Any]]] = {
-        "gpt-5-thinking": {"base_model": "gpt-5"},
-        "gpt-5-thinking-minimal": {
-            "base_model": "gpt-5",
-            "params": {"reasoning": {"effort": "minimal"}},
-        },
-        "gpt-5-thinking-high": {"base_model": "gpt-5", "params": {"reasoning": {"effort": "high"}}},
-        "gpt-5-thinking-mini": {"base_model": "gpt-5-mini"},
-        "gpt-5-thinking-mini-minimal": {
-            "base_model": "gpt-5-mini",
-            "params": {"reasoning": {"effort": "minimal"}},
-        },
-        "gpt-5-thinking-mini-high": {
-            "base_model": "gpt-5-mini",
-            "params": {"reasoning": {"effort": "high"}},
-        },
-        "gpt-5-thinking-nano": {"base_model": "gpt-5-nano"},
-        "gpt-5-thinking-nano-minimal": {
-            "base_model": "gpt-5-nano",
-            "params": {"reasoning": {"effort": "minimal"}},
-        },
-        "gpt-5-thinking-nano-high": {
-            "base_model": "gpt-5-nano",
-            "params": {"reasoning": {"effort": "high"}},
-        },
-        "o3-mini-high": {"base_model": "o3-mini", "params": {"reasoning": {"effort": "high"}}},
-        "o4-mini-high": {"base_model": "o4-mini", "params": {"reasoning": {"effort": "high"}}},
-    }
 
-    @classmethod
-    def _norm(cls, model_id: str) -> str:
-        value = (model_id or "").strip()
-        if value.startswith(cls._PREFIX):
-            value = value[len(cls._PREFIX) :]
-        return cls._DATE_RE.sub("", value.lower())
+def base_model(model_id: str) -> str:
+    """Return the canonical base model for the supplied identifier."""
+    key = _normalize_model_id(model_id)
+    alias = MODEL_ALIASES.get(key, {})
+    base = alias.get("base_model")
+    return _normalize_model_id(base) if base else key
 
-    @classmethod
-    def base_model(cls, model_id: str) -> str:
-        """Return the canonical base model for the given id or alias."""
-        key = cls._norm(model_id)
-        base = cls._ALIASES.get(key, {}).get("base_model")
-        return cls._norm(base or key)
 
-    @classmethod
-    def params(cls, model_id: str) -> dict[str, Any]:
-        """Return defaults implied by aliases (e.g., reasoning effort)."""
-        key = cls._norm(model_id)
-        return dict(cls._ALIASES.get(key, {}).get("params", {}))
+def alias_defaults(model_id: str) -> dict[str, Any]:
+    """Retrieve default parameters defined for the alias, if any."""
+    params = MODEL_ALIASES.get(_normalize_model_id(model_id), {}).get("params")
+    return deepcopy(params) if params else {}
 
-    @classmethod
-    def features(cls, model_id: str) -> frozenset[str]:
-        """Capabilities for the base model behind this id or alias."""
-        return frozenset(cls._SPECS.get(cls.base_model(model_id), {}).get("features", set()))
 
-    @classmethod
-    def supports(cls, feature: str, model_id: str) -> bool:
-        """Check if a model (alias or base) supports a given feature."""
-        return feature in cls.features(model_id)
+def features(model_id: str) -> frozenset[str]:
+    """Return the feature set associated with the base model."""
+    return MODEL_FEATURES.get(base_model(model_id), EMPTY_FEATURES)
 
+
+def supports(feature: str, model_id: str) -> bool:
+    """Determine whether the model supports a given feature."""
+    return feature in features(model_id)
+
+
+__all__ = [
+    "MODEL_ALIASES",
+    "MODEL_FEATURES",
+    "alias_defaults",
+    "base_model",
+    "features",
+    "normalize",
+    "supports",
+]
 
 # === openai_responses_manifold/app/pipe.py ===
 """Open WebUI pipe implementation backed by a modular runner."""
+
 
 
 import asyncio
@@ -167,12 +191,13 @@ import random
 from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from time import perf_counter
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from fastapi import Request
 from open_webui.models.chats import Chats
 from open_webui.models.models import ModelForm, Models
 from pydantic import BaseModel, Field
+
 
 EventEmitter = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -264,12 +289,13 @@ class ResponseRunner:
         tools = tools or {}
         openwebui_model = metadata.get("model", {}).get("id", "")
         assistant_message = ""
+        completion_emitted = False
         total_usage: dict[str, Any] = {}
         ordinal_by_url: dict[str, int] = {}
         emitted_citations: list[dict[str, Any]] = []
 
         thinking_tasks: list[asyncio.Task[Any]] = []
-        if ModelFamily.supports("reasoning", body.model):
+        if supports("reasoning", body.model):
 
             async def _later(delay: float, msg: str) -> None:
                 await asyncio.sleep(delay)
@@ -359,6 +385,7 @@ class ResponseRunner:
                             usage=total_usage,
                             done=True,
                         )
+                        completion_emitted = True
                         cancel_thinking()
                         self.logger.info("Completed streaming in %.2f seconds", respond_time)
                         break
@@ -526,7 +553,7 @@ class ResponseRunner:
                 if error_occurred or not final_response:
                     break
 
-                if not ModelFamily.supports("function_calling", body.model):
+                if not supports("function_calling", body.model):
                     break
                 call_items = final_response.get("output", [])
                 tool_calls = [item for item in call_items if item.get("type") == "function_call"]
@@ -554,7 +581,8 @@ class ResponseRunner:
                 logs = SessionLogger.logs.get(session_id, deque())
                 if logs:
                     await self._emit_citation(event_emitter, "\n".join(logs), "Logs")
-            await self._emit_completion(event_emitter, content="", usage=total_usage, done=True)
+            if not completion_emitted:
+                await self._emit_completion(event_emitter, content="", usage=total_usage, done=True)
             SessionLogger.logs.pop(SessionLogger.session_id.get(), None)
             chat_id = metadata.get("chat_id")
             message_id = metadata.get("message_id")
@@ -924,7 +952,7 @@ class Pipe:
             extra_tools=getattr(completions_body, "extra_tools", None),
         )
 
-        if tools and ModelFamily.supports("function_calling", openwebui_model_id):
+        if tools and supports("function_calling", openwebui_model_id):
             model = Models.get_model_by_id(openwebui_model_id)
             if model:
                 params = dict(model.params or {})
@@ -956,11 +984,11 @@ class Pipe:
                 level="warning",
             )
 
-        if ModelFamily.supports("function_calling", responses_body.model):
+        if supports("function_calling", responses_body.model):
             responses_body.tools = tools
 
         if (
-            ModelFamily.supports("reasoning_summary", responses_body.model)
+            supports("reasoning_summary", responses_body.model)
             and valves.REASONING_SUMMARY != "disabled"
         ):
             reasoning_params = dict(responses_body.reasoning or {})
@@ -968,7 +996,7 @@ class Pipe:
             responses_body.reasoning = reasoning_params
 
         if (
-            ModelFamily.supports("reasoning", responses_body.model)
+            supports("reasoning", responses_body.model)
             and valves.PERSIST_REASONING_TOKENS != "disabled"
             and responses_body.store is False
         ):
@@ -980,7 +1008,7 @@ class Pipe:
             isinstance(tool, dict) and tool.get("type") == "web_search"
             for tool in (responses_body.tools or [])
         ):
-            if ModelFamily.supports("web_search_tool", responses_body.model):
+            if supports("web_search_tool", responses_body.model):
                 responses_body.include = list(responses_body.include or [])
                 if "web_search_call.action.sources" not in responses_body.include:
                     responses_body.include.append("web_search_call.action.sources")
@@ -997,7 +1025,7 @@ class Pipe:
             directive_to_verbosity = {"add details": "high", "more concise": "low"}
             verbosity_value = directive_to_verbosity.get(last_user_text)
 
-            if verbosity_value and ModelFamily.supports("verbosity", responses_body.model):
+            if verbosity_value and supports("verbosity", responses_body.model):
                 current_text_params = dict(getattr(responses_body, "text", {}) or {})
                 current_text_params["verbosity"] = verbosity_value
                 responses_body.text = current_text_params
@@ -1042,9 +1070,9 @@ class Pipe:
         }
         return global_valves.model_copy(update=update)
 
-
 # === openai_responses_manifold/core/markers.py ===
 """Helpers for encoding/decoding hidden response markers."""
+
 
 
 import re
@@ -1145,14 +1173,16 @@ def split_text_by_markers(text: str) -> list[dict[str, str]]:
         segments.append({"type": "text", "text": text[last:]})
     return segments
 
-
 # === openai_responses_manifold/core/session_logger.py ===
 """Request-scoped logger used throughout the manifold."""
 
 
+
+import logging
 import sys
-from collections import defaultdict
+from collections import defaultdict, deque
 from contextvars import ContextVar
+from typing import ClassVar
 
 
 class SessionLogger:
@@ -1192,9 +1222,9 @@ class SessionLogger:
 
         return logger
 
-
 # === openai_responses_manifold/core/utils.py ===
 """General-purpose helpers shared across modules."""
+
 
 
 from collections.abc import Awaitable, Callable
@@ -1245,15 +1275,17 @@ def wrap_code_block(text: str, language: str = "python") -> str:
 
     return f"```{language}\n{text}\n```"
 
-
 # === openai_responses_manifold/core/models.py ===
 """Pydantic request/response models and transformations."""
 
 
+
+import json
 import logging
 from typing import Any, Literal
 
 from pydantic import BaseModel, model_validator
+
 
 logger = logging.getLogger(__name__)
 
@@ -1298,14 +1330,14 @@ class ResponsesBody(BaseModel):
         """Normalize alias defaults so callers get a canonical model id."""
 
         orig_model = self.model or ""
-        base_model = ModelFamily.base_model(orig_model)
-        alias_defaults = ModelFamily.params(orig_model) or {}
+        canonical_model = base_model(orig_model)
+        defaults = alias_defaults(orig_model) or {}
 
-        if base_model == orig_model and not alias_defaults:
+        if canonical_model == orig_model and not defaults:
             return self
 
         data = json.loads(self.model_dump_json(exclude_none=False))
-        data["model"] = base_model
+        data["model"] = canonical_model
 
         def _deep_overlay(dst: dict, src: dict) -> dict:
             for key, value in src.items():
@@ -1339,8 +1371,8 @@ class ResponsesBody(BaseModel):
                     dst[key] = value
             return dst
 
-        if alias_defaults:
-            _deep_overlay(data, alias_defaults)
+        if defaults:
+            _deep_overlay(data, defaults)
 
         for key, value in data.items():
             setattr(self, key, value)
@@ -1633,12 +1665,16 @@ class ResponsesBody(BaseModel):
             **extra_params,
         )
 
-
 # === openai_responses_manifold/infra/persistence.py ===
 """Persistence helpers for storing auxiliary Responses items in Open WebUI."""
 
 
+
+import datetime
 from typing import Any
+
+from open_webui.models.chats import Chats
+
 
 
 def persist_openai_response_items(
@@ -1707,12 +1743,14 @@ def fetch_openai_response_items(
         lookup[item_id] = item.get("payload", {})
     return lookup
 
-
 # === openai_responses_manifold/infra/client.py ===
 """HTTP client for interacting with the OpenAI Responses endpoint."""
 
 
+
+import json
 import logging
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import aiohttp
@@ -1813,13 +1851,15 @@ class OpenAIResponsesClient:
         )
         return self._session
 
-
 # === openai_responses_manifold/features/tools.py ===
 """Helpers for constructing OpenAI tool payloads."""
 
 
+
+import json
 import logging
 from typing import Any
+
 
 logger = logging.getLogger(__name__)
 
@@ -1835,7 +1875,7 @@ def build_tools(
     """Build the OpenAI Responses-API tool spec list for this request."""
 
     features = features or {}
-    if not ModelFamily.supports("function_calling", responses_body.model):
+    if not supports("function_calling", responses_body.model):
         return []
 
     tools: list[dict[str, Any]] = []
@@ -1849,7 +1889,7 @@ def build_tools(
         )
 
     allow_web = (
-        ModelFamily.supports("web_search_tool", responses_body.model)
+        supports("web_search_tool", responses_body.model)
         and (getattr(valves, "ENABLE_WEB_SEARCH_TOOL", False) or features.get("web_search", False))
         and ((responses_body.reasoning or {}).get("effort", "").lower() != "minimal")
     )
@@ -1897,14 +1937,16 @@ def _dedupe_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
 
     return list(seen.values())
 
-
 # === openai_responses_manifold/features/router.py ===
 """Model routing helpers (e.g., GPT-5 auto selection)."""
 
 
+
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
+
 
 logger = logging.getLogger(__name__)
 
@@ -1997,7 +2039,7 @@ async def route_gpt5_auto(
         model_choice = router_json.get("model")
         if isinstance(model_choice, str):
             responses_body.model = model_choice
-        if ModelFamily.supports("reasoning", responses_body.model):
+        if supports("reasoning", responses_body.model):
             reasoning = dict(responses_body.reasoning or {})
             effort = router_json.get("reasoning_effort")
             if isinstance(effort, str):

@@ -9,7 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, model_validator
 
 from ..infra.persistence import fetch_openai_response_items
-from .capabilities import ModelFamily
+from .capabilities import alias_defaults, base_model
 from .markers import (
     contains_marker,
     extract_markers,
@@ -60,14 +60,14 @@ class ResponsesBody(BaseModel):
         """Normalize alias defaults so callers get a canonical model id."""
 
         orig_model = self.model or ""
-        base_model = ModelFamily.base_model(orig_model)
-        alias_defaults = ModelFamily.params(orig_model) or {}
+        canonical_model = base_model(orig_model)
+        defaults = alias_defaults(orig_model) or {}
 
-        if base_model == orig_model and not alias_defaults:
+        if canonical_model == orig_model and not defaults:
             return self
 
         data = json.loads(self.model_dump_json(exclude_none=False))
-        data["model"] = base_model
+        data["model"] = canonical_model
 
         def _deep_overlay(dst: dict, src: dict) -> dict:
             for key, value in src.items():
@@ -101,8 +101,8 @@ class ResponsesBody(BaseModel):
                     dst[key] = value
             return dst
 
-        if alias_defaults:
-            _deep_overlay(data, alias_defaults)
+        if defaults:
+            _deep_overlay(data, defaults)
 
         for key, value in data.items():
             setattr(self, key, value)

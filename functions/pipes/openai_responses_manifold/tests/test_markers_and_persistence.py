@@ -2,37 +2,8 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Any
-
-import pytest
-
 import openai_responses_manifold as orm
-
-
-class FakeChats:
-    """Minimal in-memory stand-in for open_webui.models.chats.Chats."""
-
-    def __init__(self) -> None:
-        self.store: dict[str, SimpleNamespace] = {}
-
-    def bootstrap(self, chat_id: str) -> None:
-        self.store[chat_id] = SimpleNamespace(chat={"id": chat_id})
-
-    def get_chat_by_id(self, chat_id: str) -> SimpleNamespace | None:
-        return self.store.get(chat_id)
-
-    def update_chat_by_id(self, chat_id: str, payload: dict[str, Any]) -> None:
-        if chat_id not in self.store:
-            self.store[chat_id] = SimpleNamespace(chat={})
-        self.store[chat_id].chat = payload
-
-
-@pytest.fixture()
-def fake_chats(monkeypatch: pytest.MonkeyPatch) -> FakeChats:
-    fake = FakeChats()
-    monkeypatch.setattr(orm, "Chats", fake)
-    return fake
+from .fakes import InMemoryChats
 
 
 def test_marker_roundtrip() -> None:
@@ -55,9 +26,9 @@ def test_marker_roundtrip() -> None:
     assert segments[1]["type"] == "marker"
 
 
-def test_persist_and_fetch(fake_chats: FakeChats) -> None:
+def test_persist_and_fetch(chat_store: InMemoryChats) -> None:
     """Persisted response items can be retrieved by ULID and filtered by model."""
-    fake_chats.bootstrap("chat-123")
+    chat_store.ensure("chat-123")
 
     payloads = [
         {"type": "reasoning", "content": [{"type": "output_text", "text": "thinking"}]},

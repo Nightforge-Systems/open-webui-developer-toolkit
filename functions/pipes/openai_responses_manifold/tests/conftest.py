@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import sys
+from collections import deque
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, Callable
+
+import pytest
+
+from .fakes import FakeResponsesClient, InMemoryChats, SpyEventEmitter
 
 
 def _install_open_webui_stubs() -> None:
@@ -134,3 +140,84 @@ def _load_monolith_module() -> None:
 
 _install_open_webui_stubs()
 _load_monolith_module()
+
+import openai_responses_manifold as orm  # noqa: E402  # pylint: disable=wrong-import-position
+
+
+@pytest.fixture()
+def session_logger_scope() -> str:
+    """Provide a unique SessionLogger context per test."""
+
+    session_id = f"test-session-{orm.generate_item_id()}"
+    token_id = orm.SessionLogger.session_id.set(session_id)
+    token_level = orm.SessionLogger.log_level.set(logging.DEBUG)
+    try:
+        yield session_id
+    finally:
+        orm.SessionLogger.logs.pop(session_id, None)
+        orm.SessionLogger.session_id.reset(token_id)
+        orm.SessionLogger.log_level.reset(token_level)
+
+
+@pytest.fixture()
+def chat_store(monkeypatch: pytest.MonkeyPatch) -> InMemoryChats:
+    """Use the in-memory Chats store for tests."""
+
+    InMemoryChats.reset()
+    monkeypatch.setattr(orm, "Chats", InMemoryChats)
+    return InMemoryChats
+
+
+@pytest.fixture()
+def fake_responses_client() -> FakeResponsesClient:
+    """Scriptable Responses client double."""
+
+    return FakeResponsesClient()
+
+
+@pytest.fixture()
+def spy_event_emitter() -> SpyEventEmitter:
+    """Capture emitted Open WebUI events."""
+
+    return SpyEventEmitter()
+
+
+@pytest.fixture()
+def valves() -> orm.Pipe.Valves:
+    """Default valves configuration for tests."""
+
+    return orm.Pipe.Valves()
+
+
+@pytest.fixture()
+def metadata_factory() -> Callable[[str, str, str], dict[str, Any]]:
+    """Factory for metadata dicts."""
+
+    def _build(chat_id: str = "chat-1", message_id: str = "msg-1", model_id: str = "gpt-4o") -> dict[str, Any]:
+        return {"chat_id": chat_id, "message_id": message_id, "model": {"id": model_id}}
+
+    return _build
+
+
+@pytest.fixture()
+def responses_body_factory() -> Callable[..., orm.ResponsesBody]:
+    """Factory for ResponsesBody instances."""
+
+    def _make(
+        *,
+        model: str = "gpt-4o",
+        stream: bool = True,
+        input_items: list[dict[str, Any]] | None = None,
+    ) -> orm.ResponsesBody:
+        if input_items is None:
+            input_items = [{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}]
+        return orm.ResponsesBody(model=model, input=input_items, stream=stream)
+
+    return _make
+
+
+@pytest.fixture()
+def clear_session_logs(session_logger_scope: str) -> None:
+    """Ensure SessionLogger logs deque exists for tests that mutate it."""
+
+    orm.SessionLogger.logs.setdefault(session_logger_scope, deque())
