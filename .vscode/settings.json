@@ -1,5 +1,8 @@
 {
   "python.analysis.extraPaths": [
     "external/open-webui/backend"
+  ],
+  "cursorpyright.analysis.extraPaths": [
+    "external/open-webui/backend"
   ]
 }
