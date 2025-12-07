@@ -48,12 +48,12 @@ from open_webui.models.models import ModelForm, Models
 # ─────────────────────────────────────────────────────────────────────────────
 # Feature flags and other module level constants
 FEATURE_SUPPORT = {
-    "web_search_tool": {"gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o3", "o3-pro", "o4-mini", "o3-deep-research", "o4-mini-deep-research"}, # OpenAI's built-in web search tool.
-    "image_gen_tool": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1-nano", "o3"}, # OpenAI's built-in image generation tool.
-    "function_calling": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1-nano", "o3", "o4-mini", "o3-mini", "o3-pro", "o3-deep-research", "o4-mini-deep-research"}, # OpenAI's native function calling support.
-    "reasoning": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "o3", "o4-mini", "o3-mini","o3-pro", "o3-deep-research", "o4-mini-deep-research"}, # OpenAI's reasoning models.
-    "reasoning_summary": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "o3", "o4-mini", "o4-mini-high", "o3-mini", "o3-mini-high", "o3-pro", "o3-deep-research", "o4-mini-deep-research"}, # OpenAI's reasoning summary feature.  May require OpenAI org verification before use.
-    "verbosity": {"gpt-5", "gpt-5-mini", "gpt-5-nano"}, # Supports OpenAI's verbosity parameter.
+    "web_search_tool": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "gpt-5.1", "gpt-5.1-codex"}, # OpenAI's built-in web search tool.
+    "image_gen_tool": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "gpt-5.1", "gpt-5.1-codex"}, # OpenAI's built-in image generation tool.
+    "function_calling": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "gpt-5.1", "gpt-5.1-codex"}, # OpenAI's native function calling support.
+    "reasoning": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "gpt-5.1", "gpt-5.1-codex"}, # OpenAI's reasoning models.
+    "reasoning_summary": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "gpt-5.1", "gpt-5.1-codex"}, # OpenAI's reasoning summary feature.  May require OpenAI org verification before use.
+    "verbosity": {"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "gpt-5.1", "gpt-5.1-codex"}, # Supports OpenAI's verbosity parameter.
 
     # NOTE: Deep Research models are not yet supported in pipe.  Work in-progress.
     "deep_research": {"o3-deep-research", "o4-mini-deep-research"}, # OpenAI's deep research models.
@@ -102,12 +102,18 @@ class CompletionsBody(BaseModel):
             "gpt-5-thinking-nano": ("gpt-5-nano", None),
             "gpt-5-thinking-nano-minimal": ("gpt-5-nano", "minimal"),
 
-            # Placeholder router
-            "gpt-5-auto": ("gpt-5-chat-latest", None),
+            # GPT-5 Pro family
+            "gpt-5-pro": ("gpt-5-pro", None),
+            "gpt-5-pro-minimal": ("gpt-5-pro", "minimal"),
+            "gpt-5-pro-high": ("gpt-5-pro", "high"),
 
-            # Backwards compatibility
-            "o3-mini-high": ("o3-mini", "high"),
-            "o4-mini-high": ("o4-mini", "high"),
+            # GPT-5.1 Thinking family
+            "gpt-5.1-thinking": ("gpt-5.1", "medium"),
+            "gpt-5.1-thinking-high": ("gpt-5.1", "high"),
+            "gpt-5.1-thinking-minimal": ("gpt-5.1", "minimal"),
+
+            # GPT-5.1 Codex aliases
+            "gpt-5.1-codex": ("gpt-5.1-codex", None),
         }
 
         if key in aliases:
@@ -441,10 +447,20 @@ class ResponsesBody(BaseModel):
 
         # reasoning_effort → reasoning.effort (without overwriting existing effort)
         effort = completions_dict.get("reasoning_effort")
+        logging.debug(f"[REASONING DEBUG] Input reasoning_effort from completions_dict: {effort}")
+        logging.debug(f"[REASONING DEBUG] sanitized_params before conversion has reasoning_effort: {'reasoning_effort' in sanitized_params}")
+        logging.debug(f"[REASONING DEBUG] sanitized_params before conversion has reasoning: {sanitized_params.get('reasoning')}")
+
         if effort:
             reasoning = sanitized_params.get("reasoning", {})
             reasoning.setdefault("effort", effort)
             sanitized_params["reasoning"] = reasoning
+            logging.debug(f"[REASONING DEBUG] After setting reasoning object: {sanitized_params.get('reasoning')}")
+
+            # Remove the original reasoning_effort field (now converted to reasoning.effort)
+            sanitized_params.pop("reasoning_effort", None)
+            logging.debug(f"[REASONING DEBUG] After pop - reasoning_effort in sanitized_params: {'reasoning_effort' in sanitized_params}")
+            logging.debug(f"[REASONING DEBUG] After pop - reasoning in sanitized_params: {sanitized_params.get('reasoning')}")
 
         # Extract the last system message (if any)
         instructions = next((msg["content"] for msg in reversed(completions_dict.get("messages", [])) if msg["role"] == "system"), None)
@@ -461,6 +477,10 @@ class ResponsesBody(BaseModel):
             )
 
         # Build the final ResponsesBody directly
+        logging.debug(f"[REASONING DEBUG] Final sanitized_params keys before ResponsesBody creation: {list(sanitized_params.keys())}")
+        logging.debug(f"[REASONING DEBUG] Final sanitized_params has reasoning_effort: {'reasoning_effort' in sanitized_params}")
+        logging.debug(f"[REASONING DEBUG] Final sanitized_params.reasoning: {sanitized_params.get('reasoning')}")
+
         return ResponsesBody(
             **sanitized_params,
             **extra_params  # Overrides any parameters in sanitized_params with the same name since they are passed last
@@ -485,18 +505,17 @@ class Pipe:
 
         # 2) Models
         MODEL_ID: str = Field(
-            default="gpt-5-auto, gpt-5-chat-latest, gpt-5-thinking, gpt-5-thinking-high, gpt-5-thinking-minimal, gpt-4.1-nano, chatgpt-4o-latest, o3, gpt-4o",
+            default="gpt-5.1-thinking, gpt-5-codex, gpt-5-thinking, gpt-5-thinking-mini",
             description=(
             "Comma separated OpenAI model IDs. Each ID becomes a model entry in WebUI. "
-            "Supports all official OpenAI model IDs and pseudo IDs: "
+            "Supports all official OpenAI model IDs and pseudo IDs including: "
             "gpt-5-auto, "
-            "gpt-5-thinking, "
-            "gpt-5-thinking-minimal, "
-            "gpt-5-thinking-high, "
-            "gpt-5-thinking-mini, "
-            "gpt-5-thinking-mini-minimal, "
-            "gpt-5-thinking-nano, "
-            "gpt-5-thinking-nano-minimal, "
+            "gpt-5-pro, "
+            "gpt-5.1, gpt-5.1-thinking, gpt-5.1-thinking-high, gpt-5.1-thinking-minimal, "
+            "gpt-5.1-codex, codex (alias), gpt-5.1-codex-latest, "
+            "gpt-5-thinking, gpt-5-thinking-minimal, gpt-5-thinking-high, "
+            "gpt-5-thinking-mini, gpt-5-thinking-mini-minimal, "
+            "gpt-5-thinking-nano, gpt-5-thinking-nano-minimal, "
             "o3-mini-high, o4-mini-high."
             ),
         )
@@ -786,7 +805,7 @@ class Pipe:
                     self.logger.debug("Set text.verbosity=%s based on regenerate directive '%s'",verbosity_value, last_user_text)
 
         # Log the transformed request body
-        self.logger.debug("Transformed ResponsesBody: %s", json.dumps(responses_body.model_dump(exclude_none=True), indent=2, ensure_ascii=False))
+        self.logger.debug("Transformed ResponsesBody: %s", json.dumps(responses_body.model_dump(exclude_none=True, exclude={"reasoning_effort"}), indent=2, ensure_ascii=False))
             
         # Send to OpenAI Responses API
         if responses_body.stream:
@@ -832,12 +851,14 @@ class Pipe:
         try:
             for loop_idx in range(valves.MAX_FUNCTION_CALL_LOOPS):
                 final_response: dict[str, Any] | None = None
+                last_event_type = None
                 async for event in self.send_openai_responses_streaming_request(
-                    body.model_dump(exclude_none=True),
+                    body.model_dump(exclude_none=True, exclude={"reasoning_effort"}),
                     api_key=valves.API_KEY,
                     base_url=valves.BASE_URL,
                 ):
                     etype = event.get("type")
+                    last_event_type = etype
 
                     # Efficient check if debug logging is enabled. If so, log the event name
                     if self.logger.isEnabledFor(logging.DEBUG):
@@ -1019,6 +1040,21 @@ class Pipe:
 
                         continue
 
+                    # ─── Handle error events from OpenAI
+                    if etype == "error":
+                        error_obj = event.get("error", {})
+                        error_code = error_obj.get("code", "unknown")
+                        error_message = error_obj.get("message", "Unknown error")
+                        self.logger.error(f"OpenAI API Error [{error_code}]: {error_message}")
+                        raise ValueError(f"OpenAI API Error: {error_message}")
+
+                    if etype == "response.failed":
+                        response_data = event.get("response", {})
+                        error_obj = response_data.get("error", {})
+                        error_message = error_obj.get("message", "Response failed")
+                        self.logger.error(f"OpenAI Response Failed: {error_message}")
+                        raise ValueError(f"OpenAI Response Failed: {error_message}")
+
                     # ─── Capture final response (incl. all non-visible items like reasoning tokens for future turns)
                     if etype == "response.completed":
                         final_response = event.get("response", {})
@@ -1026,6 +1062,8 @@ class Pipe:
                         break
 
                 if final_response is None:
+                    self.logger.error(f"No final response received from OpenAI Responses API. Loop index: {loop_idx}, Last event type received: {last_event_type}")
+                    self.logger.error(f"Expected response.completed event but stream ended without it.")
                     raise ValueError("No final response received from OpenAI Responses API.")
 
                 # Extract usage information from OpenAI response and pass-through to Open WebUI
@@ -1138,7 +1176,7 @@ class Pipe:
         try:
             for loop_idx in range(valves.MAX_FUNCTION_CALL_LOOPS):
                 response = await self.send_openai_responses_nonstreaming_request(
-                    body.model_dump(exclude_none=True),
+                    body.model_dump(exclude_none=True, exclude={"reasoning_effort"}),
                     api_key=valves.API_KEY,
                     base_url=valves.BASE_URL,
                 )
@@ -1373,6 +1411,7 @@ class Pipe:
 
                     data_part = line[5:].strip()
                     if data_part == b"[DONE]":
+                        self.logger.debug("[SSE] Received [DONE] marker, ending stream")
                         return  # End of SSE stream
                     
                     # Yield JSON-decoded data
